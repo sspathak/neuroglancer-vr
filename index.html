@@ -83,6 +83,9 @@
         <button id="btn-copy-link" class="btn" title="Copy shareable link with current 3D view & stereo parameters">
           🔗 Copy Link
         </button>
+        <button id="btn-cuboid-limit" class="btn" title="Toggle 3D Cuboid Limit for Quest optimization (Shortcut: C)">
+          📦 Cuboid: OFF
+        </button>
         <button id="btn-aspect-fix" class="btn" title="Toggle Quest 2:1 SBS horizontal stretch fix (Shortcut: A)">
           ⇋ Aspect Fix
         </button>
@@ -250,6 +253,35 @@
         </div>
         <div class="control-sub">0.5x fixes 2:1 stretch in Quest (<kbd>A</kbd>)</div>
       </div>
+
+      <!-- Control 10: 3D Cuboid Limit (Quest Optimization) -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>3D Cuboid Limit (Quest)</span>
+          <span id="val-cuboid" class="control-val">OFF (Full)</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:2px;">
+          <button id="btn-toggle-cuboid" class="btn" style="flex:1; padding:4px 7px; font-size:11px; font-weight:600;" title="Toggle 3D Cuboid Limit (Shortcut: C)">
+            📦 Enable Cuboid
+          </button>
+          <button id="btn-center-cuboid" class="btn" style="padding:4px 7px; font-size:11px; font-weight:600;" title="Center Cuboid on current view focal point (Shortcut: Shift+C)">
+            🎯 Center View
+          </button>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
+          <select id="select-cuboid-size" class="hud-select" style="flex:1; padding:3px 6px; font-size:11px;">
+            <option value="256">256³ voxels (Fastest / Ultra Quest)</option>
+            <option value="384">384³ voxels (Fast)</option>
+            <option value="512" selected>512³ voxels (Balanced - Recommended)</option>
+            <option value="768">768³ voxels (Detailed)</option>
+            <option value="1024">1024³ voxels (Large)</option>
+          </select>
+          <button id="btn-cuboid-cage" class="btn active" style="padding:3px 7px; font-size:10.5px;" title="Toggle 3D Wireframe Cage Outline">
+            Box
+          </button>
+        </div>
+        <div class="control-sub">Limits chunk fetching & raycasting to 3D subvolume (<kbd>C</kbd>)</div>
+      </div>
     </div>
 
     <!-- Row 3: Keyboard Shortcuts & Navigation Hints -->
@@ -265,6 +297,8 @@
         <kbd>Z</kbd> Zoom-Rel ·
         <kbd>Shift+Z</kbd> Res ·
         <kbd>A</kbd> Aspect Fix ·
+        <kbd>C</kbd> Cuboid ·
+        <kbd>Shift+C</kbd> Center ·
         <kbd>V</kbd> Mode ·
         <kbd>O</kbd> Orbit ·
         <kbd>R</kbd> Reset ·

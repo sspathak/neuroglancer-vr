@@ -27,6 +27,12 @@
     zoomRelative: true,       // Zoom-relative depth range mode (scales depth step with zoom)
     depthSamples: 256,        // 3D volume raycast depth sampling resolution (128..1024)
     aspectCorrection: 1.0,    // Aspect ratio correction (1.0 = Normal/Cardboard, 0.5 = Quest 2:1 SBS Stretch Fix)
+    cuboidLimit: {
+      enabled: false,         // 3D Cuboid subvolume limit (drastically cuts chunk fetching for Quest)
+      size: 512,              // Extent in voxels (256, 384, 512, 768, 1024)
+      center: null,           // [x, y, z] in voxels (null = defaults to viewer.position)
+      showCage: true,         // Show cyan 3D wireframe bounding box cage
+    },
     activePreset: 'escargot',
   };
 
@@ -270,6 +276,12 @@ void main() {
   const valAspect = document.getElementById('val-aspect');
   const btnToggleAspect = document.getElementById('btn-toggle-aspect');
   const btnAspectFix = document.getElementById('btn-aspect-fix');
+  const btnCuboidLimit = document.getElementById('btn-cuboid-limit');
+  const btnToggleCuboid = document.getElementById('btn-toggle-cuboid');
+  const btnCenterCuboid = document.getElementById('btn-center-cuboid');
+  const selectCuboidSize = document.getElementById('select-cuboid-size');
+  const btnCuboidCage = document.getElementById('btn-cuboid-cage');
+  const valCuboid = document.getElementById('val-cuboid');
   const btnCloseHud = document.getElementById('btn-close-hud');
   const btnGyroTrack = document.getElementById('btn-gyro-track');
   const landscapePrompt = document.getElementById('landscape-prompt');
@@ -974,6 +986,10 @@ void main() {
       stereoState.volumeGain
     );
     applyStateToBothViewers(stateObj);
+    stereoState.cuboidLimit.center = null;
+    if (stereoState.cuboidLimit.enabled) {
+      applyCuboidLimit(false);
+    }
     showStereoToast(`Loaded: ${preset.label}`);
   }
 
@@ -1315,6 +1331,142 @@ void main() {
       setAspectCorrection(0.5);
       showStereoToast('Aspect: 0.5x Quest SBS Fix (Compensates 2:1 Stretch)');
     }
+  }
+
+  // ============================================================================
+  // 9b. 3D Cuboid Subvolume Limit (Quest Mobile Processor Optimization)
+  // ============================================================================
+  function getDatasetCenterFallback() {
+    if (leftViewer?.navigationState?.pose?.position?.value) {
+      return Array.from(leftViewer.navigationState.pose.position.value);
+    }
+    return [500, 500, 350];
+  }
+
+  function updateCuboidAnnotation(viewer, min, max, visible) {
+    if (!viewer?.layerSpecification) return;
+    try {
+      const curLayers = viewer.layerSpecification.toJSON();
+      const filtered = curLayers.filter((l) => l.name !== '3D_Cuboid_Limit');
+      if (visible && min && max) {
+        filtered.push({
+          type: 'annotation',
+          name: '3D_Cuboid_Limit',
+          annotations: [
+            {
+              type: 'axis_aligned_bounding_box',
+              id: 'cuboid_box',
+              pointA: [min[0], min[1], min[2]],
+              pointB: [max[0], max[1], max[2]],
+            },
+          ],
+          annotationColor: '#00e5ff',
+        });
+      }
+      viewer.layerSpecification.restoreState(filtered);
+    } catch (e) {
+      console.warn('Could not update cuboid annotation layer:', e);
+    }
+  }
+
+  function applyCuboidLimit(showToastMsg = true) {
+    const enabled = stereoState.cuboidLimit.enabled;
+    const size = stereoState.cuboidLimit.size;
+    let center = stereoState.cuboidLimit.center;
+    if (!center) {
+      center = getDatasetCenterFallback();
+      stereoState.cuboidLimit.center = center;
+    }
+
+    const half = size / 2;
+    const min = [
+      Math.round(center[0] - half),
+      Math.round(center[1] - half),
+      Math.round(center[2] - half),
+    ];
+    const max = [
+      Math.round(center[0] + half),
+      Math.round(center[1] + half),
+      Math.round(center[2] + half),
+    ];
+
+    const limitObj = {
+      enabled: enabled,
+      size: size,
+      min: min,
+      max: max,
+    };
+
+    if (iframeLeft?.contentWindow) iframeLeft.contentWindow.vrCuboidLimit = limitObj;
+    if (iframeRight?.contentWindow) iframeRight.contentWindow.vrCuboidLimit = limitObj;
+
+    // Update UI elements
+    if (btnCuboidLimit) {
+      btnCuboidLimit.textContent = enabled ? '📦 Cuboid: ON' : '📦 Cuboid: OFF';
+      btnCuboidLimit.classList.toggle('active', enabled);
+    }
+    if (btnToggleCuboid) {
+      btnToggleCuboid.textContent = enabled ? 'Disable Cuboid' : '📦 Enable Cuboid';
+      btnToggleCuboid.classList.toggle('active', enabled);
+    }
+    if (valCuboid) {
+      valCuboid.textContent = enabled ? `${size}³ voxels` : 'OFF (Full)';
+    }
+    if (selectCuboidSize) {
+      selectCuboidSize.value = String(size);
+    }
+    if (btnCuboidCage) {
+      btnCuboidCage.classList.toggle('active', stereoState.cuboidLimit.showCage);
+    }
+
+    // Update 3D wireframe bounding cage in both eyes
+    const showCage = enabled && stereoState.cuboidLimit.showCage;
+    if (leftViewer) updateCuboidAnnotation(leftViewer, min, max, showCage);
+    if (rightViewer) updateCuboidAnnotation(rightViewer, min, max, showCage);
+
+    // Force redraw & chunk requery
+    leftViewer?.display?.scheduleRedraw();
+    rightViewer?.display?.scheduleRedraw();
+
+    if (showToastMsg) {
+      showStereoToast(
+        enabled
+          ? `📦 3D Cuboid Limit: ON (${size}³ voxels — Quest Optimized)`
+          : '📦 3D Cuboid Limit: OFF (Full Volume)'
+      );
+    }
+  }
+
+  function toggleCuboidLimit() {
+    stereoState.cuboidLimit.enabled = !stereoState.cuboidLimit.enabled;
+    if (stereoState.cuboidLimit.enabled && !stereoState.cuboidLimit.center) {
+      stereoState.cuboidLimit.center = getDatasetCenterFallback();
+    }
+    applyCuboidLimit(true);
+  }
+
+  function centerCuboidOnView() {
+    stereoState.cuboidLimit.center = getDatasetCenterFallback();
+    if (!stereoState.cuboidLimit.enabled) {
+      stereoState.cuboidLimit.enabled = true;
+    }
+    applyCuboidLimit(false);
+    const c = stereoState.cuboidLimit.center.map((v) => Math.round(v));
+    showStereoToast(`📦 Cuboid Centered on [${c.join(', ')}] (${stereoState.cuboidLimit.size}³)`);
+  }
+
+  function setCuboidSize(sizeVal) {
+    const parsed = parseInt(sizeVal, 10) || 512;
+    stereoState.cuboidLimit.size = parsed;
+    applyCuboidLimit(stereoState.cuboidLimit.enabled);
+  }
+
+  function toggleCuboidCage() {
+    stereoState.cuboidLimit.showCage = !stereoState.cuboidLimit.showCage;
+    applyCuboidLimit(false);
+    showStereoToast(
+      stereoState.cuboidLimit.showCage ? 'Cuboid 3D Cage: Visible' : 'Cuboid 3D Cage: Hidden'
+    );
   }
 
   // ============================================================================
@@ -1880,6 +2032,36 @@ void main() {
     });
   }
 
+  if (btnCuboidLimit) {
+    btnCuboidLimit.addEventListener('click', () => {
+      toggleCuboidLimit();
+    });
+  }
+
+  if (btnToggleCuboid) {
+    btnToggleCuboid.addEventListener('click', () => {
+      toggleCuboidLimit();
+    });
+  }
+
+  if (btnCenterCuboid) {
+    btnCenterCuboid.addEventListener('click', () => {
+      centerCuboidOnView();
+    });
+  }
+
+  if (selectCuboidSize) {
+    selectCuboidSize.addEventListener('change', (e) => {
+      setCuboidSize(e.target.value);
+    });
+  }
+
+  if (btnCuboidCage) {
+    btnCuboidCage.addEventListener('click', () => {
+      toggleCuboidCage();
+    });
+  }
+
   btnNgUi.addEventListener('click', () => {
     updateNgUiVisibility(!stereoState.showNgUi);
     showStereoToast(
@@ -1897,6 +2079,9 @@ void main() {
     params.set('dolly', String(stereoState.autoDollyPercent));
     if (stereoState.aspectCorrection !== 1.0) {
       params.set('aspect', String(stereoState.aspectCorrection));
+    }
+    if (stereoState.cuboidLimit.enabled) {
+      params.set('cuboid', String(stereoState.cuboidLimit.size));
     }
     if (stereoState.swapEyes) params.set('swap', '1');
     params.set('state', JSON.stringify(stateJson));
@@ -2116,6 +2301,12 @@ void main() {
     } else if (e.key === 'a' || e.key === 'A') {
       e.preventDefault();
       toggleAspectCorrection();
+    } else if (e.key === 'c') {
+      e.preventDefault();
+      toggleCuboidLimit();
+    } else if (e.key === 'C') {
+      e.preventDefault();
+      centerCuboidOnView();
     } else if (e.key === 'f' || e.key === 'F') {
       e.preventDefault();
       toggleFullscreen();
@@ -2177,6 +2368,10 @@ void main() {
     if (params.has('aspect')) {
       setAspectCorrection(parseFloat(params.get('aspect')));
     }
+    if (params.has('cuboid')) {
+      stereoState.cuboidLimit.enabled = true;
+      stereoState.cuboidLimit.size = parseInt(params.get('cuboid'), 10) || 512;
+    }
     if (params.get('swap') === '1') {
       stereoState.swapEyes = true;
       btnSwapEyes.classList.add('active');
@@ -2225,6 +2420,9 @@ void main() {
 
     // Ensure initial Zoom-relative mode and sampling resolution are set
     toggleZoomRelative(stereoState.zoomRelative);
+
+    // Initialize 3D cuboid limit state
+    applyCuboidLimit(false);
 
     syncDot.classList.add('ready');
     syncLabel.textContent = 'Stereo 3D Lockstep Sync Active (60 FPS)';

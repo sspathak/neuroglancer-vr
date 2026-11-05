@@ -67,6 +67,17 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
     - Setting Aspect Correction to **`0.50x`** pre-squeezes the horizontal projection matrix in clip space ($0.5 \times 2.0 = 1.0$), perfectly neutralizing Quest's 2× stretch and restoring true 1:1 isometric voxel proportions!
     - Toggle with hotkey **`A`**, the **`⇋ Aspect Fix`** header button, or fine-tune between `0.40x` and `1.40x` with the SBS Aspect slider in Control Card 9.
 
+- **3D Cuboid Subvolume Limit (Quest Processor Optimization)**:
+  - **The Problem**: Huge organ scans (e.g. the $12000 \times 14000 \times 19000$ HiP-CT heart) comprise millions of voxels and thousands of chunks. Unconstrained chunk fetching and raycasting overwhelms the Meta Quest's mobile processor (Snapdragon XR2) and GPU memory, causing low framerates and thermal throttling.
+  - **The Solution**: Introduces spatial chunk traversal bounds and raycasting clipping (`window.vrCuboidLimit`) directly into Neuroglancer's core rendering engine:
+    - **Restricted Chunk Fetching**: Strictly limits chunk queries in `lF` so chunks outside the 3D cuboid are **never traversed, requested over the network, or uploaded to GPU memory**.
+    - **Clipped 3D Raycasting**: Clips the volume raycaster's vertex bounding boxes and fragment ray traversal limits directly to the cuboid boundaries.
+    - **Interactive Controls**:
+      - Toggle with **`📦 Cuboid: ON / OFF`** in the header or hotkey **`C`**.
+      - **`🎯 Center View` (or `Shift+C`)**: Snaps the 3D cuboid directly onto the current 3D camera focal point (`viewer.position`), letting you inspect any anatomical ROI in full fidelity.
+      - Select subvolume extent: $256^3$ (ultra-fast for Quest), $384^3$, $512^3$ (recommended), $768^3$, or $1024^3$ voxels.
+      - **3D Wireframe Cage**: Renders a crisp glowing cyan 3D bounding box cage (`axis_aligned_bounding_box`) in true stereo depth so you can clearly see the cuboid bounds in space.
+
 - **Mobile Browser & Google Cardboard Support**:
   - **Adaptive Responsive HUD**: Fully touch-friendly and smoothly scrollable on iOS Safari and Android Chrome, preventing UI cutoffs on small screens.
   - **Phone Gyroscope 3DoF Head Tracking (`🎯 Gyro`)**:
@@ -103,6 +114,8 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
 | `Z` | Toggle Zoom-Relative Depth Range Mode |
 | `Shift+Z` | Cycle 3D Raycast Resolution (128 → 256 → 512 → 1024 samples) |
 | `A` | Toggle SBS Aspect Ratio Fix (1.0x Normal ↔ 0.5x Quest SBS Stretch Fix) |
+| `C` | Toggle 3D Cuboid Subvolume Limit (Quest Optimization) |
+| `Shift+C` | Center 3D Cuboid on Current View Focal Point |
 | `V` | Cycle 3D Rendering Mode (Volume Only → Volume + Slices → MIP → Slices Only) |
 | `O` | Toggle Hands-Free 3D Auto-Orbit Turntable |
 | `X` | Swap Left / Right Eyes (Parallel vs. Cross-Eye mode) |
