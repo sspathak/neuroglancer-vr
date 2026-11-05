@@ -794,6 +794,11 @@ void main() {
       },
       true
     );
+
+    // Prime Quest media playback on any interaction inside either eye iframe
+    doc.addEventListener('pointerdown', primeMediaPlayback, { capture: true, passive: true });
+    doc.addEventListener('click', primeMediaPlayback, { capture: true, passive: true });
+    doc.addEventListener('touchstart', primeMediaPlayback, { capture: true, passive: true });
   }
 
   // ============================================================================
@@ -1358,6 +1363,88 @@ void main() {
   // 10b. Meta Quest Media Session & SBS Playback Bar Integration
   // ============================================================================
   let mediaSessionAudio = null;
+  let lastMediaTime = 0;
+  let lastSeekTimestamp = 0;
+
+  function createSilent360sWavBlob() {
+    const sampleRate = 8000;
+    const durationSec = 360;
+    const numSamples = sampleRate * durationSec;
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    const writeStr = (off, s) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // Mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  function applySeekRotation(degrees) {
+    const now = performance.now();
+    if (now - lastSeekTimestamp < 150) return; // Debounce 150ms against duplicate events
+    lastSeekTimestamp = now;
+
+    rotateVolumeDegrees(degrees);
+    currentRotationAngle = (currentRotationAngle + degrees + 360) % 360;
+    if (mediaSessionAudio) {
+      lastMediaTime = currentRotationAngle;
+      try {
+        mediaSessionAudio.currentTime = currentRotationAngle;
+      } catch (_) {}
+    }
+    updateMediaSessionState();
+    showStereoToast(
+      `${degrees > 0 ? '↻' : '↺'} Rotated ${degrees > 0 ? '+' : ''}${Math.round(degrees)}°`
+    );
+  }
+
+  function startAutoOrbitFromMedia() {
+    stereoState.autoOrbit = true;
+    if (btnAutoOrbit) btnAutoOrbit.classList.add('active');
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
+    updateMediaSessionState();
+    showStereoToast('▶ Auto-Orbit Started (Quest Play)');
+  }
+
+  function stopAutoOrbitFromMedia() {
+    stereoState.autoOrbit = false;
+    if (btnAutoOrbit) btnAutoOrbit.classList.remove('active');
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'paused';
+    }
+    updateMediaSessionState();
+    showStereoToast('⏸ Auto-Orbit Paused (Quest Pause)');
+  }
+
+  function primeMediaPlayback() {
+    if (mediaSessionAudio && mediaSessionAudio.paused) {
+      mediaSessionAudio
+        .play()
+        .then(() => {
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = stereoState.autoOrbit ? 'playing' : 'paused';
+            updateMediaSessionState();
+          }
+        })
+        .catch(() => {});
+    }
+  }
 
   function updateMediaSessionState() {
     if (!('mediaSession' in navigator)) return;
@@ -1373,112 +1460,125 @@ void main() {
   }
 
   function initMediaSession() {
-    if (!('mediaSession' in navigator)) return;
+    if (mediaSessionAudio) return;
 
-    // Silent looping audio to keep MediaSession active in Quest Horizon OS media player
-    if (!mediaSessionAudio) {
-      const silentWav =
-        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-      mediaSessionAudio = new Audio(silentWav);
-      mediaSessionAudio.loop = true;
-      mediaSessionAudio.volume = 0.01;
+    try {
+      const blob = createSilent360sWavBlob();
+      const url = URL.createObjectURL(blob);
+
+      const audio = document.createElement('audio');
+      audio.id = 'quest-sbs-media-player';
+      audio.src = url;
+      audio.loop = true;
+      audio.preload = 'auto';
+      audio.volume = 0.05; // Audible (low volume) so Horizon OS recognizes active media
+      audio.style.position = 'fixed';
+      audio.style.bottom = '0px';
+      audio.style.left = '0px';
+      audio.style.width = '1px';
+      audio.style.height = '1px';
+      audio.style.opacity = '0.001';
+      audio.style.pointerEvents = 'none';
+      audio.style.zIndex = '-1';
+      document.body.appendChild(audio);
+      mediaSessionAudio = audio;
+
+      // Pathway 2: Direct media element timeupdate and seeking listeners
+      audio.addEventListener('seeking', () => {
+        const diff = audio.currentTime - lastMediaTime;
+        if (Math.abs(diff) >= 0.8) {
+          applySeekRotation(diff);
+        }
+        lastMediaTime = audio.currentTime;
+      });
+
+      audio.addEventListener('play', () => {
+        startAutoOrbitFromMedia();
+      });
+
+      audio.addEventListener('pause', () => {
+        stopAutoOrbitFromMedia();
+      });
+    } catch (err) {
+      console.warn('Could not initialize audio element:', err);
     }
 
-    const startAudio = () => {
-      if (mediaSessionAudio && mediaSessionAudio.paused) {
-        mediaSessionAudio.play().catch(() => {});
-      }
-    };
-    window.addEventListener('click', startAudio, { once: true });
-    window.addEventListener('touchstart', startAudio, { once: true });
-    window.addEventListener('pointerdown', startAudio, { once: true });
+    // Attach interaction primers to window and document
+    window.addEventListener('click', primeMediaPlayback, { capture: true });
+    window.addEventListener('touchstart', primeMediaPlayback, { capture: true });
+    window.addEventListener('pointerdown', primeMediaPlayback, { capture: true });
+    document.addEventListener('click', primeMediaPlayback, { capture: true });
+    document.addEventListener('pointerdown', primeMediaPlayback, { capture: true });
 
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'Neuroglancer 3D Volume',
-        artist: 'VRZarr (Quest SBS Mode)',
-        album: '⏪ -10s / ⏩ +10s rotates view ±10° | ▶/⏸ Auto-Orbit',
-      });
-    } catch (_) {}
+    // Pathway 1: MediaSession API Integration
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: 'Neuroglancer 3D Volume',
+          artist: 'VRZarr (Quest SBS Mode)',
+          album: '⏪ -10s / ⏩ +10s rotates view ±10° | ▶/⏸ Auto-Orbit',
+        });
+      } catch (_) {}
 
-    navigator.mediaSession.playbackState = stereoState.autoOrbit ? 'playing' : 'paused';
+      navigator.mediaSession.playbackState = 'paused';
 
-    // -10 sec button: Rotate view -10 degrees (Yaw Left)
-    try {
-      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-        const deg = details?.seekOffset || 10;
-        rotateVolumeDegrees(-deg);
-        currentRotationAngle = (currentRotationAngle - deg + 360) % 360;
-        updateMediaSessionState();
-        showStereoToast(`↺ Rotated -${deg}° (Quest -10s)`);
-      });
-    } catch (_) {}
+      // -10 sec button: Rotate view -10 degrees (Yaw Left)
+      try {
+        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+          const deg = details?.seekOffset || 10;
+          applySeekRotation(-deg);
+        });
+      } catch (_) {}
 
-    // +10 sec button: Rotate view +10 degrees (Yaw Right)
-    try {
-      navigator.mediaSession.setActionHandler('seekforward', (details) => {
-        const deg = details?.seekOffset || 10;
-        rotateVolumeDegrees(deg);
-        currentRotationAngle = (currentRotationAngle + deg) % 360;
-        updateMediaSessionState();
-        showStereoToast(`↻ Rotated +${deg}° (Quest +10s)`);
-      });
-    } catch (_) {}
+      // +10 sec button: Rotate view +10 degrees (Yaw Right)
+      try {
+        navigator.mediaSession.setActionHandler('seekforward', (details) => {
+          const deg = details?.seekOffset || 10;
+          applySeekRotation(deg);
+        });
+      } catch (_) {}
 
-    // Play button: Start Auto-Orbit
-    try {
-      navigator.mediaSession.setActionHandler('play', () => {
-        stereoState.autoOrbit = true;
-        if (mediaSessionAudio && mediaSessionAudio.paused) {
-          mediaSessionAudio.play().catch(() => {});
-        }
-        navigator.mediaSession.playbackState = 'playing';
-        if (btnAutoOrbit) btnAutoOrbit.classList.add('active');
-        showStereoToast('▶ Auto-Orbit Started (Quest Play)');
-        updateMediaSessionState();
-      });
-    } catch (_) {}
+      // Play button: Start Auto-Orbit
+      try {
+        navigator.mediaSession.setActionHandler('play', () => {
+          startAutoOrbitFromMedia();
+        });
+      } catch (_) {}
 
-    // Pause button: Stop Auto-Orbit
-    try {
-      navigator.mediaSession.setActionHandler('pause', () => {
-        stereoState.autoOrbit = false;
-        navigator.mediaSession.playbackState = 'paused';
-        if (btnAutoOrbit) btnAutoOrbit.classList.remove('active');
-        showStereoToast('⏸ Auto-Orbit Paused (Quest Pause)');
-        updateMediaSessionState();
-      });
-    } catch (_) {}
+      // Pause button: Stop Auto-Orbit
+      try {
+        navigator.mediaSession.setActionHandler('pause', () => {
+          stopAutoOrbitFromMedia();
+        });
+      } catch (_) {}
 
-    // Timeline Scrubbing: Map 0-360 seconds directly to 0°-360° rotation angle
-    try {
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details?.seekTime !== undefined) {
-          const targetDeg = details.seekTime % 360;
-          const delta = targetDeg - currentRotationAngle;
-          rotateVolumeDegrees(delta);
-          currentRotationAngle = targetDeg;
-          updateMediaSessionState();
-          showStereoToast(`🎯 Rotated to ${Math.round(targetDeg)}°`);
-        }
-      });
-    } catch (_) {}
+      // Timeline Scrubbing: Map 0-360 seconds directly to 0°-360° rotation angle
+      try {
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (details?.seekTime !== undefined) {
+            const targetDeg = details.seekTime % 360;
+            const delta = targetDeg - currentRotationAngle;
+            applySeekRotation(delta);
+          }
+        });
+      } catch (_) {}
 
-    // Next Track: Cycle resolution depth samples
-    try {
-      navigator.mediaSession.setActionHandler('nexttrack', () => {
-        cycleResolutionSamples();
-      });
-    } catch (_) {}
+      // Next Track: Cycle resolution depth samples
+      try {
+        navigator.mediaSession.setActionHandler('nexttrack', () => {
+          cycleResolutionSamples();
+        });
+      } catch (_) {}
 
-    // Previous Track: Toggle 3D Cuboid Limit
-    try {
-      navigator.mediaSession.setActionHandler('previoustrack', () => {
-        toggleCuboidLimit();
-      });
-    } catch (_) {}
+      // Previous Track: Toggle 3D Cuboid Limit
+      try {
+        navigator.mediaSession.setActionHandler('previoustrack', () => {
+          toggleCuboidLimit();
+        });
+      } catch (_) {}
 
-    updateMediaSessionState();
+      updateMediaSessionState();
+    }
   }
 
   // ============================================================================
@@ -2323,10 +2423,12 @@ void main() {
   });
 
   btnFullscreen.addEventListener('click', () => {
+    primeMediaPlayback();
     toggleFullscreen();
   });
 
   hudToggleBtn.addEventListener('click', () => {
+    primeMediaPlayback();
     document.body.classList.toggle('hud-collapsed');
   });
 
@@ -2335,6 +2437,7 @@ void main() {
   });
 
   btnRotateFs?.addEventListener('click', () => {
+    primeMediaPlayback();
     toggleFullscreen();
   });
 
@@ -2558,6 +2661,21 @@ void main() {
         leftViewer.projectionScale.reset();
       }
       showStereoToast('Reset 3D Camera Pose');
+    } else if (
+      e.key === 'MediaFastForward' ||
+      (document.fullscreenElement && e.key === 'ArrowRight' && !e.shiftKey && !e.ctrlKey)
+    ) {
+      e.preventDefault();
+      applySeekRotation(10);
+    } else if (
+      e.key === 'MediaRewind' ||
+      (document.fullscreenElement && e.key === 'ArrowLeft' && !e.shiftKey && !e.ctrlKey)
+    ) {
+      e.preventDefault();
+      applySeekRotation(-10);
+    } else if (e.key === 'MediaPlayPause') {
+      e.preventDefault();
+      btnAutoOrbit.click();
     }
   }
 
