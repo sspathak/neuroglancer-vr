@@ -2,13 +2,25 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>VRZarr — Stereoscopic 3D Neuroglancer Viewer</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- Mobile Landscape Orientation Helper for Google Cardboard -->
+  <div id="landscape-prompt" class="landscape-prompt">
+    <div class="prompt-content">
+      <span class="prompt-icon">📱</span>
+      <div class="prompt-text">
+        <strong>Rotate to Landscape</strong>
+        <span>Required for Google Cardboard VR</span>
+      </div>
+      <button id="btn-rotate-fs" class="btn primary">Fullscreen</button>
+    </div>
+  </div>
+
   <!-- Side-by-Side (SBS) Stereoscopic Stage -->
-  <div id="stereo-stage" class="vr-lens-mode">
+  <div id="stereo-stage">
     <!-- Left Eye Viewport -->
     <div id="eye-left" class="eye-viewport">
       <div class="eye-frame-wrapper">
@@ -53,13 +65,16 @@
       </div>
 
       <div class="hud-actions">
+        <button id="btn-enter-webxr" class="btn primary highlight" style="display: none;" title="Enter True Immersive 6DoF VR on Meta Quest 2 / Headsets (Controllers: Trigger=Rotate, Stick=Zoom, A=Res, B=Zoom-Rel)">
+          🥽 Enter VR (Quest 2)
+        </button>
         <button id="btn-auto-orbit" class="btn" title="Smoothly rotate the 3D object hands-free (Shortcut: O)">
           ⟳ Auto-Orbit
         </button>
         <button id="btn-swap-eyes" class="btn" title="Swap Left/Right eyes for Cross-Eye vs Parallel VR viewing (Shortcut: X)">
           ⇄ Swap Eyes (Parallel)
         </button>
-        <button id="btn-lens-frame" class="btn active" title="Toggle rounded VR lens frame & vignette">
+        <button id="btn-lens-frame" class="btn" title="Toggle rounded VR lens frame & vignette (for phone headsets)">
           🥽 VR Lens Frame
         </button>
         <button id="btn-ng-ui" class="btn" title="Show/Hide full Neuroglancer layer bar & shader UI inside both eyes (Shortcut: h)">
@@ -68,8 +83,14 @@
         <button id="btn-copy-link" class="btn" title="Copy shareable link with current 3D view & stereo parameters">
           🔗 Copy Link
         </button>
+        <button id="btn-gyro-track" class="btn" title="Toggle Phone Gyroscope Head Tracking for Google Cardboard">
+          🎯 Gyro Track
+        </button>
         <button id="btn-fullscreen" class="btn primary" title="Enter Fullscreen for VR Viewer (Shortcut: F)">
           ⛶ Fullscreen
+        </button>
+        <button id="btn-close-hud" class="btn" title="Close Controls Panel">
+          ✕ Close
         </button>
       </div>
     </div>
@@ -174,6 +195,43 @@
           </select>
         </div>
       </div>
+
+      <!-- Control 7: Zoom-Relative Depth Mode -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>Zoom-Relative Depth</span>
+          <span id="val-zoom-relative" class="control-val">ON (Relative)</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:2px;">
+          <button id="btn-toggle-zoom-relative" class="btn active" style="flex:1; justify-content:center; padding:5px 8px; font-weight:600;">
+            ⇋ Zoom-Relative Mode
+          </button>
+        </div>
+        <div class="control-sub">Keeps zoom; scales depth step (<kbd>Z</kbd> · Quest <kbd>B</kbd>)</div>
+      </div>
+
+      <!-- Control 8: 3D Raycast Sampling Resolution -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>3D Raycast Resolution</span>
+          <span id="val-depth-samples" class="control-val">256 Samples</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:2px;">
+          <select id="select-depth-samples" class="hud-select" style="flex:1; padding:4px 8px;">
+            <option value="128">128 Samples (Fast)</option>
+            <option value="192">192 Samples</option>
+            <option value="256" selected>256 Samples (Default)</option>
+            <option value="384">384 Samples</option>
+            <option value="512">512 Samples (High Res)</option>
+            <option value="768">768 Samples (Ultra Res)</option>
+            <option value="1024">1024 Samples (Extreme)</option>
+          </select>
+          <button id="btn-cycle-res" class="btn" title="Cycle resolution quality (Shortcut: Shift+Z)" style="padding:4px 8px;">
+            +Res
+          </button>
+        </div>
+        <div class="control-sub">Increases 3D voxel detail (<kbd>Shift+Z</kbd> · Quest <kbd>A</kbd>)</div>
+      </div>
     </div>
 
     <!-- Row 3: Keyboard Shortcuts & Navigation Hints -->
@@ -186,6 +244,8 @@
         <kbd>[</kbd><kbd>]</kbd> Stereo ·
         <kbd>-</kbd><kbd>=</kbd> Conv ·
         <kbd>,</kbd><kbd>.</kbd> 3D FOV ·
+        <kbd>Z</kbd> Zoom-Rel ·
+        <kbd>Shift+Z</kbd> Res ·
         <kbd>V</kbd> Mode ·
         <kbd>O</kbd> Orbit ·
         <kbd>R</kbd> Reset ·

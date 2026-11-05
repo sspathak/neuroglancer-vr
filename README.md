@@ -60,6 +60,25 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
   - **Synchronized Stereo 3D Reticle**: Renders a matched cursor in both eyes simultaneously so your eyes never see a single-eye OS cursor in VR.
   - **Dual-Eye Stereo HUD Toasts**: Keyboard adjustments display a synchronized stereo notification in both eyes so you can read parameter changes without removing your headset.
 
+- **Zoom-Relative Depth Mode & 3D Resolution Multipliers**:
+  - Keep the exact same camera framing and zoom while dramatically increasing 3D voxel resolution.
+  - **Zoom-Relative Depth Mode (`Z` / Button `B`)**: In Neuroglancer, toggles between fixed depth range and relative depth range (`projectionDepthRange < 0`). When enabled, the sampling depth automatically tightens with zoom, eliminating coarse stair-stepping and clipping.
+  - **3D Raycast Resolution (`Shift+Z` / Button `A`)**: Dynamically sets `volumeRenderingDepthSamplesTarget` (128, 192, 256, 384, 512, 768, 1024 samples) across all image layers in both eyes simultaneously.
+- **Oculus Quest 2 & Meta Quest Browser Immersion**:
+  - **Native WebXR 6DoF Mode (`🥽 Enter VR`)**: Automatically detected on Meta Quest Browser. Clicking "Enter VR" launches true 6DoF immersive stereoscopic VR on an IMAX-sized curved virtual display that wraps comfortably around the user.
+  - **Quest Touch Controllers**:
+    - **Trigger / Grip Drag**: Natural 6DoF rotation of the 3D volume in mid-air.
+    - **Right Thumbstick Y**: Smooth 3D Dolly Zoom in and out.
+    - **Left Thumbstick X**: Adjust camera-relative Stereo Eye Separation (IPD).
+    - **Button A (Right Controller)**: Cycle 3D Raycast Resolution (128 → 256 → 512 → 1024 samples) with haptic rumble.
+    - **Button B (Right Controller)**: Toggle Zoom-Relative Depth Mode with haptic rumble.
+    - **Button X (Left Controller)**: Toggle VR Controls Dock.
+    - **Button Y (Left Controller)**: Reset 3D camera pose.
+  - **Quest Browser Formatting Guide**:
+    - **Why 180°/360° looks broken**: The Quest Browser's 180° and 360° video modes project onto a spherical dome (for 360 camera video), warping flat rectilinear 3D perspective graphics into curved distortion.
+    - **Why Quest's Media Player locks interaction**: Meta's video player treats pages as passive movies and intercepts controller laser-pointers.
+    - **The Solution**: Use **`🥽 Enter VR`** for native 6DoF immersion, or use Quest Browser in normal window mode with **"Switch to Giant Curved Display"** instead of the video player.
+
 ## Keyboard Shortcuts (Work in Fullscreen VR)
 
 | Key | Action |
@@ -67,6 +86,8 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
 | `[` / `]` | Decrease / Increase Stereo Eye Shift (IPD) |
 | `-` / `=` | Decrease / Increase Convergence (Focal Plane Depth) |
 | `,` / `.` | Decrease / Increase 3D Perspective FOV (Lens Distortion) |
+| `Z` | Toggle Zoom-Relative Depth Range Mode |
+| `Shift+Z` | Cycle 3D Raycast Resolution (128 → 256 → 512 → 1024 samples) |
 | `V` | Cycle 3D Rendering Mode (Volume Only → Volume + Slices → MIP → Slices Only) |
 | `O` | Toggle Hands-Free 3D Auto-Orbit Turntable |
 | `X` | Swap Left / Right Eyes (Parallel vs. Cross-Eye mode) |

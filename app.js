@@ -24,6 +24,8 @@
     colormap: 'amber',        // 'amber' | 'grayscale' | 'cyan' | 'emerald'
     autoOrbit: false,
     showNgUi: false,
+    zoomRelative: true,       // Zoom-relative depth range mode (scales depth step with zoom)
+    depthSamples: 256,        // 3D volume raycast depth sampling resolution (128..1024)
     activePreset: 'escargot',
   };
 
@@ -257,6 +259,16 @@ void main() {
   const btnNgUi = document.getElementById('btn-ng-ui');
   const btnCopyLink = document.getElementById('btn-copy-link');
   const btnFullscreen = document.getElementById('btn-fullscreen');
+  const btnEnterWebXR = document.getElementById('btn-enter-webxr');
+  const btnToggleZoomRelative = document.getElementById('btn-toggle-zoom-relative');
+  const valZoomRelative = document.getElementById('val-zoom-relative');
+  const selectDepthSamples = document.getElementById('select-depth-samples');
+  const valDepthSamples = document.getElementById('val-depth-samples');
+  const btnCycleRes = document.getElementById('btn-cycle-res');
+  const btnCloseHud = document.getElementById('btn-close-hud');
+  const btnGyroTrack = document.getElementById('btn-gyro-track');
+  const landscapePrompt = document.getElementById('landscape-prompt');
+  const btnRotateFs = document.getElementById('btn-rotate-fs');
   const hudToggleBtn = document.getElementById('hud-toggle-btn');
   const stereoStage = document.getElementById('stereo-stage');
 
@@ -619,6 +631,13 @@ void main() {
           srcLayer.volumeRenderingMode.value !== dstLayer.volumeRenderingMode.value
         ) {
           dstLayer.volumeRenderingMode.value = srcLayer.volumeRenderingMode.value;
+        }
+        if (
+          srcLayer.volumeRenderingDepthSamplesTarget &&
+          dstLayer.volumeRenderingDepthSamplesTarget &&
+          srcLayer.volumeRenderingDepthSamplesTarget.value !== dstLayer.volumeRenderingDepthSamplesTarget.value
+        ) {
+          dstLayer.volumeRenderingDepthSamplesTarget.value = srcLayer.volumeRenderingDepthSamplesTarget.value;
         }
 
         // 3. Sync User-Edited Shader Code
@@ -1151,6 +1170,9 @@ void main() {
           if (userLayer.volumeRenderingGain) {
             userLayer.volumeRenderingGain.value = stereoState.volumeGain;
           }
+          if (userLayer.volumeRenderingDepthSamplesTarget) {
+            userLayer.volumeRenderingDepthSamplesTarget.value = stereoState.depthSamples;
+          }
 
           if (
             stereoState.activePreset &&
@@ -1252,6 +1274,440 @@ void main() {
     refreshStereoProjection();
   }
 
+  // ============================================================================
+  // 10. Zoom-Relative Depth Mode & 3D Resolution Sampling Controls
+  // ============================================================================
+  function toggleZoomRelative(forceVal) {
+    const nextVal = typeof forceVal === 'boolean' ? forceVal : !stereoState.zoomRelative;
+    stereoState.zoomRelative = nextVal;
+
+    for (const v of [leftViewer, rightViewer]) {
+      if (!v?.projectionDepthRange) continue;
+      const current = v.projectionDepthRange.value;
+      const zoom = v.navigationState?.zoomFactor?.value || 1.0;
+      if (nextVal) {
+        // Zoom-relative: negative depth range
+        if (current > 0) {
+          v.projectionDepthRange.value = -current / zoom;
+        } else if (current === 0) {
+          v.projectionDepthRange.value = -50;
+        }
+      } else {
+        // Fixed absolute depth range: positive depth range
+        if (current < 0) {
+          v.projectionDepthRange.value = -current * zoom;
+        }
+      }
+      v.display.scheduleRedraw();
+    }
+
+    if (btnToggleZoomRelative) {
+      btnToggleZoomRelative.classList.toggle('active', stereoState.zoomRelative);
+    }
+    if (valZoomRelative) {
+      valZoomRelative.textContent = stereoState.zoomRelative ? 'ON (Relative)' : 'OFF (Fixed)';
+    }
+    showStereoToast(
+      stereoState.zoomRelative
+        ? 'Zoom-Relative: ON (Depth scales with zoom)'
+        : 'Zoom-Relative: OFF (Fixed depth)'
+    );
+  }
+
+  function setDepthSamples(sampleCount) {
+    const samples = parseInt(sampleCount, 10);
+    if (!Number.isFinite(samples) || samples <= 0) return;
+    stereoState.depthSamples = samples;
+
+    for (const v of [leftViewer, rightViewer]) {
+      if (!v) continue;
+      for (const m of v.layerManager.managedLayers) {
+        const layer = m.layer;
+        if (layer?.volumeRenderingDepthSamplesTarget) {
+          layer.volumeRenderingDepthSamplesTarget.value = samples;
+        }
+      }
+      v.display.scheduleRedraw();
+    }
+
+    if (selectDepthSamples) {
+      selectDepthSamples.value = String(samples);
+    }
+    if (valDepthSamples) {
+      valDepthSamples.textContent = `${samples} Samples`;
+    }
+    showStereoToast(`3D Raycast Resolution: ${samples} Samples`);
+  }
+
+  const RESOLUTION_LEVELS = [128, 192, 256, 384, 512, 768, 1024];
+  function cycleResolutionSamples() {
+    const curr = stereoState.depthSamples;
+    let idx = RESOLUTION_LEVELS.indexOf(curr);
+    if (idx === -1) {
+      idx = 0;
+      for (let i = 0; i < RESOLUTION_LEVELS.length; i++) {
+        if (RESOLUTION_LEVELS[i] >= curr) {
+          idx = i;
+          break;
+        }
+      }
+    }
+    const nextIdx = (idx + 1) % RESOLUTION_LEVELS.length;
+    setDepthSamples(RESOLUTION_LEVELS[nextIdx]);
+  }
+
+  function resetCamera() {
+    if (stereoState.activePreset && PRESETS[stereoState.activePreset]) {
+      loadPreset(stereoState.activePreset);
+    } else if (leftViewer) {
+      leftViewer.projectionOrientation?.reset?.();
+      leftViewer.projectionScale?.reset?.();
+    }
+    showStereoToast('Reset 3D Camera Pose');
+  }
+
+  // ============================================================================
+  // 11. WebXR Immersive 6DoF Stereoscopic VR Engine (Meta Quest 2 & Headsets)
+  // ============================================================================
+  let xrSession = null;
+  let xrRefSpace = null;
+  let xrGl = null;
+  let xrLayer = null;
+  let xrProgram = null;
+  let xrVAO = null;
+  let xrIndexCount = 0;
+  let xrTexLeft = null;
+  let xrTexRight = null;
+  let xrLastGrabPos = { left: null, right: null };
+  let xrButtonDebounce = { a: false, b: false, x: false, y: false };
+
+  function initWebXR() {
+    if (!navigator.xr) return;
+    navigator.xr
+      .isSessionSupported('immersive-vr')
+      .then((supported) => {
+        if (supported && btnEnterWebXR) {
+          btnEnterWebXR.style.display = '';
+          btnEnterWebXR.addEventListener('click', () => {
+            if (xrSession) {
+              xrSession.end();
+            } else {
+              startWebXRSession();
+            }
+          });
+          showStereoToast('Quest 2 Ready: Click "Enter VR" for 6DoF immersion!');
+        }
+      })
+      .catch((err) => {
+        console.warn('WebXR check error:', err);
+      });
+  }
+
+  async function startWebXRSession() {
+    if (!navigator.xr || xrSession) return;
+    try {
+      showStereoToast('Starting Quest 2 Immersive VR…');
+      const session = await navigator.xr.requestSession('immersive-vr', {
+        requiredFeatures: ['local-floor'],
+        optionalFeatures: ['bounded-floor', 'hand-tracking'],
+      });
+      xrSession = session;
+
+      const xrCanvas = document.createElement('canvas');
+      const gl = xrCanvas.getContext('webgl2', { xrCompatible: true });
+      if (!gl) {
+        throw new Error('WebGL2 with XR compatibility not supported');
+      }
+      await gl.makeXRCompatible();
+      xrGl = gl;
+
+      xrLayer = new XRWebGLLayer(session, gl);
+      session.updateRenderState({ baseLayer: xrLayer });
+      xrRefSpace = await session.requestReferenceSpace('local-floor');
+
+      initXRShadersAndGeometry(gl);
+      initXRTextures(gl);
+
+      session.addEventListener('end', onXRSessionEnded);
+      session.requestAnimationFrame(onXRFrame);
+
+      if (btnEnterWebXR) {
+        btnEnterWebXR.textContent = '❌ Exit VR';
+        btnEnterWebXR.classList.add('active');
+      }
+      showStereoToast('VR Active: Grip=Rotate, Stick=Zoom, A=Res, B=Zoom-Rel');
+    } catch (err) {
+      console.error('WebXR session start failed:', err);
+      showStereoToast(`WebXR Error: ${err.message || 'Could not start VR'}`);
+    }
+  }
+
+  function onXRSessionEnded() {
+    xrSession = null;
+    if (btnEnterWebXR) {
+      btnEnterWebXR.textContent = '🥽 Enter VR (Quest 2)';
+      btnEnterWebXR.classList.remove('active');
+    }
+    showStereoToast('Exited VR Session');
+  }
+
+  function initXRShadersAndGeometry(gl) {
+    const vsSource = `#version 300 es
+    in vec3 aPosition;
+    in vec2 aTexCoord;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uViewMatrix;
+    out vec2 vTexCoord;
+    void main() {
+      vTexCoord = aTexCoord;
+      gl_Position = uProjectionMatrix * uViewMatrix * vec4(aPosition, 1.0);
+    }`;
+
+    const fsSource = `#version 300 es
+    precision mediump float;
+    uniform sampler2D uTexture;
+    in vec2 vTexCoord;
+    out vec4 fragColor;
+    void main() {
+      fragColor = texture(uTexture, vTexCoord);
+    }`;
+
+    function createShader(gl, type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(s));
+      }
+      return s;
+    }
+
+    const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    xrProgram = prog;
+
+    // Curved IMAX-style display cylinder segment in VR space
+    const slices = 32;
+    const radius = 1.85;
+    const halfAngle = 0.92; // ~53 degrees each side (106 deg total FOV)
+    const yTop = 1.35 + 0.85;
+    const yBottom = 1.35 - 0.85;
+
+    const vertices = [];
+    const indices = [];
+
+    for (let i = 0; i <= slices; i++) {
+      const u = i / slices;
+      const angle = -halfAngle + 2 * halfAngle * u;
+      const x = radius * Math.sin(angle);
+      const z = -radius * Math.cos(angle) + (radius - 1.45);
+
+      vertices.push(x, yTop, z, u, 0.0);
+      vertices.push(x, yBottom, z, u, 1.0);
+    }
+
+    for (let i = 0; i < slices; i++) {
+      const topL = i * 2;
+      const botL = topL + 1;
+      const topR = (i + 1) * 2;
+      const botR = topR + 1;
+
+      indices.push(topL, botL, topR);
+      indices.push(topR, botL, botR);
+    }
+
+    xrIndexCount = indices.length;
+
+    xrVAO = gl.createVertexArray();
+    gl.bindVertexArray(xrVAO);
+
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+    const aPos = gl.getAttribLocation(prog, 'aPosition');
+    const aTex = gl.getAttribLocation(prog, 'aTexCoord');
+
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 5 * 4, 0);
+
+    gl.enableVertexAttribArray(aTex);
+    gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 5 * 4, 3 * 4);
+
+    gl.bindVertexArray(null);
+  }
+
+  function initXRTextures(gl) {
+    function makeTex() {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      return t;
+    }
+    xrTexLeft = makeTex();
+    xrTexRight = makeTex();
+  }
+
+  function onXRFrame(time, frame) {
+    if (!xrSession) return;
+    xrSession.requestAnimationFrame(onXRFrame);
+
+    const pose = frame.getViewerPose(xrRefSpace);
+    if (!pose) return;
+
+    handleXRControllers(frame, xrRefSpace);
+
+    const gl = xrGl;
+    const lCanvas = iframeLeft?.contentWindow?.document?.querySelector('canvas');
+    const rCanvas = iframeRight?.contentWindow?.document?.querySelector('canvas');
+
+    if (lCanvas && xrTexLeft) {
+      gl.bindTexture(gl.TEXTURE_2D, xrTexLeft);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, lCanvas);
+    }
+    if (rCanvas && xrTexRight) {
+      gl.bindTexture(gl.TEXTURE_2D, xrTexRight);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, rCanvas);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, xrLayer.framebuffer);
+    gl.clearColor(0.01, 0.02, 0.03, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.useProgram(xrProgram);
+    gl.bindVertexArray(xrVAO);
+
+    const uProjLoc = gl.getUniformLocation(xrProgram, 'uProjectionMatrix');
+    const uViewLoc = gl.getUniformLocation(xrProgram, 'uViewMatrix');
+    const uTexLoc = gl.getUniformLocation(xrProgram, 'uTexture');
+    gl.uniform1i(uTexLoc, 0);
+
+    for (const view of pose.views) {
+      const viewport = xrLayer.getViewport(view);
+      gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+
+      gl.uniformMatrix4fv(uProjLoc, false, view.projectionMatrix);
+      gl.uniformMatrix4fv(uViewLoc, false, view.transform.inverse.matrix);
+
+      gl.activeTexture(gl.TEXTURE0);
+      const isRightEye = stereoState.swapEyes
+        ? view.eye === 'left'
+        : view.eye === 'right';
+
+      gl.bindTexture(gl.TEXTURE_2D, isRightEye ? xrTexRight : xrTexLeft);
+      gl.drawElements(gl.TRIANGLES, xrIndexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    gl.bindVertexArray(null);
+  }
+
+  function handleXRControllers(frame, refSpace) {
+    if (!xrSession) return;
+    for (const source of xrSession.inputSources) {
+      const gp = source.gamepad;
+      if (!gp) continue;
+      const hand = source.handedness;
+
+      const stickX = gp.axes[2] !== undefined ? gp.axes[2] : gp.axes[0] || 0;
+      const stickY = gp.axes[3] !== undefined ? gp.axes[3] : gp.axes[1] || 0;
+
+      // Right controller: Dolly Zoom & Resolution / Zoom-Relative buttons
+      if (hand === 'right') {
+        if (Math.abs(stickY) > 0.18 && leftViewer?.projectionScale) {
+          const factor = 1.0 + stickY * 0.035;
+          leftViewer.projectionScale.value = Math.max(10, leftViewer.projectionScale.value * factor);
+          refreshStereoProjection();
+        }
+
+        // Button A (index 4): Cycle Resolution Samples
+        if (gp.buttons[4]?.pressed) {
+          if (!xrButtonDebounce.a) {
+            xrButtonDebounce.a = true;
+            cycleResolutionSamples();
+            gp.hapticActuators?.[0]?.pulse?.(0.7, 50);
+          }
+        } else {
+          xrButtonDebounce.a = false;
+        }
+
+        // Button B (index 5): Toggle Zoom-Relative Depth
+        if (gp.buttons[5]?.pressed) {
+          if (!xrButtonDebounce.b) {
+            xrButtonDebounce.b = true;
+            toggleZoomRelative();
+            gp.hapticActuators?.[0]?.pulse?.(0.7, 50);
+          }
+        } else {
+          xrButtonDebounce.b = false;
+        }
+      }
+
+      // Left controller: IPD adjustment, HUD toggle, Reset
+      if (hand === 'left') {
+        if (Math.abs(stickX) > 0.18) {
+          setSeparation(stereoState.separationPercent + stickX * 0.12);
+        }
+
+        // Button X (index 4): Toggle HUD
+        if (gp.buttons[4]?.pressed) {
+          if (!xrButtonDebounce.x) {
+            xrButtonDebounce.x = true;
+            document.body.classList.toggle('hud-collapsed');
+            gp.hapticActuators?.[0]?.pulse?.(0.5, 40);
+          }
+        } else {
+          xrButtonDebounce.x = false;
+        }
+
+        // Button Y (index 5): Reset View
+        if (gp.buttons[5]?.pressed) {
+          if (!xrButtonDebounce.y) {
+            xrButtonDebounce.y = true;
+            resetCamera();
+            gp.hapticActuators?.[0]?.pulse?.(0.5, 40);
+          }
+        } else {
+          xrButtonDebounce.y = false;
+        }
+      }
+
+      // 6DoF Drag Rotation via Controller (Trigger or Grip):
+      const trigger = gp.buttons[0]?.pressed;
+      const grip = gp.buttons[1]?.pressed;
+      if (trigger || grip) {
+        const pose = frame.getPose(source.gripSpace || source.targetRaySpace, refSpace);
+        if (pose && leftViewer?.navigationState?.pose) {
+          const pos = pose.transform.position;
+          if (xrLastGrabPos[hand]) {
+            const dx = (pos.x - xrLastGrabPos[hand].x) * 450.0;
+            const dy = (pos.y - xrLastGrabPos[hand].y) * 450.0;
+            if (Math.hypot(dx, dy) > 0.1) {
+              const viewerPos = leftViewer.navigationState.pose.position.value;
+              leftViewer.navigationState.pose.rotateAbsolute([0, 1, 0], -dx * 0.015, viewerPos);
+              leftViewer.navigationState.pose.rotateAbsolute([1, 0, 0], -dy * 0.015, viewerPos);
+              leftViewer.display.scheduleRedraw();
+              refreshStereoProjection();
+            }
+          }
+          xrLastGrabPos[hand] = { x: pos.x, y: pos.y, z: pos.z };
+        }
+      } else {
+        xrLastGrabPos[hand] = null;
+      }
+    }
+  }
+
   sliderSeparation.addEventListener('input', (e) => {
     setSeparation(parseFloat(e.target.value));
   });
@@ -1334,7 +1790,30 @@ void main() {
     stereoStage.classList.toggle('vr-lens-mode');
     const active = stereoStage.classList.contains('vr-lens-mode');
     btnLensFrame.classList.toggle('active', active);
+    showStereoToast(
+      active
+        ? 'Lens Mode: ON (Cardboard Circular Vignette)'
+        : 'Full-Bleed SBS: ON (Edge-to-Edge)'
+    );
   });
+
+  if (btnToggleZoomRelative) {
+    btnToggleZoomRelative.addEventListener('click', () => {
+      toggleZoomRelative();
+    });
+  }
+
+  if (selectDepthSamples) {
+    selectDepthSamples.addEventListener('change', (e) => {
+      setDepthSamples(e.target.value);
+    });
+  }
+
+  if (btnCycleRes) {
+    btnCycleRes.addEventListener('click', () => {
+      cycleResolutionSamples();
+    });
+  }
 
   btnNgUi.addEventListener('click', () => {
     updateNgUiVisibility(!stereoState.showNgUi);
@@ -1373,16 +1852,140 @@ void main() {
     document.body.classList.toggle('hud-collapsed');
   });
 
+  btnCloseHud?.addEventListener('click', () => {
+    document.body.classList.add('hud-collapsed');
+  });
+
+  btnRotateFs?.addEventListener('click', () => {
+    toggleFullscreen();
+  });
+
+  let screenWakeLock = null;
+  async function requestWakeLock() {
+    if ('wakeLock' in navigator) {
+      try {
+        screenWakeLock = await navigator.wakeLock.request('screen');
+      } catch (e) {}
+    }
+  }
+
+  function releaseWakeLock() {
+    if (screenWakeLock) {
+      screenWakeLock.release().catch(() => {});
+      screenWakeLock = null;
+    }
+  }
+
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen?.().catch(() => {});
+      screen.orientation?.lock?.('landscape').catch(() => {});
+      requestWakeLock();
       document.body.classList.add('hud-collapsed');
-      showStereoToast('VR Fullscreen (Press Shift+H for Controls)');
+      showStereoToast('Cardboard VR Fullscreen');
     } else {
       document.exitFullscreen?.().catch(() => {});
+      releaseWakeLock();
       document.body.classList.remove('hud-collapsed');
     }
   }
+
+  // ============================================================================
+  // Mobile Gyroscope Head Tracking for Google Cardboard (3DoF)
+  // ============================================================================
+  let gyroActive = false;
+  let lastOrientation = null;
+
+  async function toggleGyroTracking() {
+    if (gyroActive) {
+      disableGyroTracking();
+      return;
+    }
+
+    if (
+      typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function'
+    ) {
+      try {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm !== 'granted') {
+          showStereoToast('Gyro Permission Denied');
+          return;
+        }
+      } catch (err) {
+        console.warn('DeviceOrientation error:', err);
+      }
+    }
+
+    enableGyroTracking();
+  }
+
+  function enableGyroTracking() {
+    gyroActive = true;
+    lastOrientation = null;
+    window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
+    btnGyroTrack?.classList.add('active');
+    requestWakeLock();
+    showStereoToast('🎯 Cardboard Gyro: ON (Move phone to look around)');
+  }
+
+  function disableGyroTracking() {
+    gyroActive = false;
+    lastOrientation = null;
+    window.removeEventListener('deviceorientation', handleDeviceOrientation);
+    btnGyroTrack?.classList.remove('active');
+    showStereoToast('🎯 Cardboard Gyro: OFF');
+  }
+
+  function handleDeviceOrientation(e) {
+    if (!gyroActive || !leftViewer?.navigationState?.pose) return;
+    const { alpha, beta, gamma } = e;
+    if (alpha === null || beta === null || gamma === null) return;
+
+    if (!lastOrientation) {
+      lastOrientation = { alpha, beta, gamma };
+      return;
+    }
+
+    let dAlpha = alpha - lastOrientation.alpha;
+    let dBeta = beta - lastOrientation.beta;
+    let dGamma = gamma - lastOrientation.gamma;
+
+    if (dAlpha > 180) dAlpha -= 360;
+    if (dAlpha < -180) dAlpha += 360;
+
+    lastOrientation = { alpha, beta, gamma };
+
+    const orient = window.orientation || (screen.orientation && screen.orientation.angle) || 90;
+    const isReverseLandscape = orient === -90 || orient === 270;
+
+    const pitchDelta = (isReverseLandscape ? -dGamma : dGamma) * (Math.PI / 180);
+    const yawDelta = -dAlpha * (Math.PI / 180);
+
+    const pos = leftViewer.navigationState.pose.position.value;
+    if (Math.abs(yawDelta) > 0.001) {
+      leftViewer.navigationState.pose.rotateAbsolute([0, 1, 0], yawDelta * 0.85, pos);
+    }
+    if (Math.abs(pitchDelta) > 0.001) {
+      leftViewer.navigationState.pose.rotateAbsolute([1, 0, 0], pitchDelta * 0.85, pos);
+    }
+    leftViewer.display.scheduleRedraw();
+    refreshStereoProjection();
+  }
+
+  btnGyroTrack?.addEventListener('click', () => {
+    toggleGyroTracking();
+  });
+
+  function checkOrientation() {
+    const isPortrait = window.matchMedia('(orientation: portrait) and (max-width: 900px)').matches;
+    if (landscapePrompt) {
+      landscapePrompt.style.display = isPortrait ? 'block' : 'none';
+    }
+  }
+  window.addEventListener('orientationchange', checkOrientation);
+  window.addEventListener('resize', checkOrientation);
+  checkOrientation();
 
   function handleGlobalHotkeys(e) {
     const tag = (e.target && e.target.tagName) || '';
@@ -1428,6 +2031,12 @@ void main() {
           ? 'VR Controls: Hidden (Shift+H to show)'
           : 'VR Controls: Visible'
       );
+    } else if (e.key === 'z') {
+      e.preventDefault();
+      toggleZoomRelative();
+    } else if (e.key === 'Z') {
+      e.preventDefault();
+      cycleResolutionSamples();
     } else if (e.key === 'f' || e.key === 'F') {
       e.preventDefault();
       toggleFullscreen();
@@ -1525,6 +2134,12 @@ void main() {
     if (!tryRestoreFromUrlHash()) {
       loadPreset('escargot');
     }
+
+    // Initialize WebXR for Meta Quest 2 and VR headsets
+    initWebXR();
+
+    // Ensure initial Zoom-relative mode and sampling resolution are set
+    toggleZoomRelative(stereoState.zoomRelative);
 
     syncDot.classList.add('ready');
     syncLabel.textContent = 'Stereo 3D Lockstep Sync Active (60 FPS)';
