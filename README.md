@@ -64,8 +64,9 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
   - When viewing Side-by-Side (SBS) stereoscopic content in Meta Quest's browser or media viewer, the viewer treats each eye viewport as an anamorphic **Half-SBS** frame and stretches each half horizontally by **2.0×** to fill a 16:9 field of view.
   - On a standard window without correction, this causes spherical organs and voxels to appear severely widened (oval/distorted).
   - VRZarr introduces a direct **Projection Matrix Aspect Correction hook** (`vrStereoHook`) into Neuroglancer's WebGL camera builder:
-    - Setting Aspect Correction to **`0.50x`** pre-squeezes the horizontal projection matrix in clip space ($0.5 \times 2.0 = 1.0$), perfectly neutralizing Quest's 2× stretch and restoring true 1:1 isometric voxel proportions!
-    - Toggle with hotkey **`A`**, the **`⇋ Aspect Fix`** header button, or fine-tune between `0.40x` and `1.40x` with the SBS Aspect slider in Control Card 9.
+    - In standard 3D perspective projection matrices (`out[0] = f / aspect`), width on screen is inversely proportional to aspect ($X_{ndc} \propto \frac{1}{\text{aspect}}$).
+    - Setting Aspect Correction to **`2.00x`** scales horizontal clip coordinates by $\frac{1}{2.0} = 0.5\times$ (pre-squeezing horizontally), so that when Quest stretches the image by $2.0\times$, $0.5 \times 2.0 = 1.0\times$ perfectly restores true 1:1 square voxels!
+    - Toggle with hotkey **`A`**, the **`⇋ Aspect Fix`** header button, or fine-tune between `0.50x` and `2.50x` with the SBS Aspect slider in Control Card 9.
 
 - **3D Cuboid Subvolume Limit (Quest Processor Optimization)**:
   - **The Problem**: Huge organ scans (e.g. the $12000 \times 14000 \times 19000$ HiP-CT heart) comprise millions of voxels and thousands of chunks. Unconstrained chunk fetching and raycasting overwhelms the Meta Quest's mobile processor (Snapdragon XR2) and GPU memory, causing low framerates and thermal throttling.
@@ -113,7 +114,7 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
 | `,` / `.` | Decrease / Increase 3D Perspective FOV (Lens Distortion) |
 | `Z` | Toggle Zoom-Relative Depth Range Mode |
 | `Shift+Z` | Cycle 3D Raycast Resolution (128 → 256 → 512 → 1024 samples) |
-| `A` | Toggle SBS Aspect Ratio Fix (1.0x Normal ↔ 0.5x Quest SBS Stretch Fix) |
+| `A` | Toggle SBS Aspect Ratio Fix (1.0x Normal ↔ 2.0x Quest SBS Stretch Fix) |
 | `C` | Toggle 3D Cuboid Subvolume Limit (Quest Optimization) |
 | `Shift+C` | Center 3D Cuboid on Current View Focal Point |
 | `V` | Cycle 3D Rendering Mode (Volume Only → Volume + Slices → MIP → Slices Only) |

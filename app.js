@@ -744,31 +744,48 @@ void main() {
     const doc = iframeEl.contentDocument;
     if (!win || !doc) return;
 
+    function updateReticle(clientX, clientY) {
+      if (clientX === undefined || clientY === undefined) return;
+      const w = win.innerWidth || 1;
+      const h = win.innerHeight || 1;
+      const xPct = (clientX / w) * 100;
+      const yPct = (clientY / h) * 100;
+      reticleLeft.style.left = `${xPct}%`;
+      reticleLeft.style.top = `${yPct}%`;
+      reticleRight.style.left = `${xPct}%`;
+      reticleRight.style.top = `${yPct}%`;
+      reticleLeft.classList.add('visible');
+      reticleRight.classList.add('visible');
+    }
+
+    function hideReticle() {
+      reticleLeft.classList.remove('visible');
+      reticleRight.classList.remove('visible');
+    }
+
     doc.addEventListener(
       'mousemove',
-      (e) => {
-        const w = win.innerWidth || 1;
-        const h = win.innerHeight || 1;
-        const xPct = (e.clientX / w) * 100;
-        const yPct = (e.clientY / h) * 100;
-        reticleLeft.style.left = `${xPct}%`;
-        reticleLeft.style.top = `${yPct}%`;
-        reticleRight.style.left = `${xPct}%`;
-        reticleRight.style.top = `${yPct}%`;
-        reticleLeft.classList.add('visible');
-        reticleRight.classList.add('visible');
-      },
+      (e) => updateReticle(e.clientX, e.clientY),
       { passive: true }
     );
 
     doc.addEventListener(
-      'mouseleave',
-      () => {
-        reticleLeft.classList.remove('visible');
-        reticleRight.classList.remove('visible');
+      'pointermove',
+      (e) => updateReticle(e.clientX, e.clientY),
+      { passive: true }
+    );
+
+    doc.addEventListener(
+      'touchmove',
+      (e) => {
+        if (e.touches?.[0]) updateReticle(e.touches[0].clientX, e.touches[0].clientY);
       },
       { passive: true }
     );
+
+    doc.addEventListener('mouseleave', hideReticle, { passive: true });
+    doc.addEventListener('pointerup', hideReticle, { passive: true });
+    doc.addEventListener('touchend', hideReticle, { passive: true });
 
     win.addEventListener(
       'keydown',
@@ -1306,30 +1323,30 @@ void main() {
   }
 
   function setAspectCorrection(val) {
-    const clamped = Math.max(0.3, Math.min(2.0, parseFloat(val) || 1.0));
+    const clamped = Math.max(0.4, Math.min(3.0, parseFloat(val) || 1.0));
     stereoState.aspectCorrection = clamped;
     if (sliderAspect) sliderAspect.value = String(clamped);
     if (valAspect) {
-      if (Math.abs(clamped - 0.5) < 0.03) {
-        valAspect.textContent = '0.50x (Quest Fix)';
-      } else if (Math.abs(clamped - 1.0) < 0.03) {
+      if (Math.abs(clamped - 2.0) < 0.05) {
+        valAspect.textContent = '2.00x (Quest Fix)';
+      } else if (Math.abs(clamped - 1.0) < 0.05) {
         valAspect.textContent = '1.00x (Normal)';
       } else {
         valAspect.textContent = `${clamped.toFixed(2)}x`;
       }
     }
-    btnToggleAspect?.classList.toggle('active', Math.abs(clamped - 0.5) < 0.03);
-    btnAspectFix?.classList.toggle('active', Math.abs(clamped - 0.5) < 0.03);
+    btnToggleAspect?.classList.toggle('active', Math.abs(clamped - 2.0) < 0.05);
+    btnAspectFix?.classList.toggle('active', Math.abs(clamped - 2.0) < 0.05);
     refreshStereoProjection();
   }
 
   function toggleAspectCorrection() {
-    if (Math.abs(stereoState.aspectCorrection - 0.5) < 0.03) {
+    if (Math.abs(stereoState.aspectCorrection - 2.0) < 0.05) {
       setAspectCorrection(1.0);
       showStereoToast('Aspect: 1.0x Normal (1:1 Native)');
     } else {
-      setAspectCorrection(0.5);
-      showStereoToast('Aspect: 0.5x Quest SBS Fix (Compensates 2:1 Stretch)');
+      setAspectCorrection(2.0);
+      showStereoToast('Aspect: 2.0x Quest SBS Fix (Compensates 2:1 Stretch)');
     }
   }
 
