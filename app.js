@@ -1262,32 +1262,224 @@ void main() {
   }
 
   // ============================================================================
-  // 10. Auto-Orbit Turntable Animation Loop
+  // 10. Auto-Orbit & Media Session Controls (Quest SBS Playback Bar)
   // ============================================================================
+  function rotateVolumeDegrees(degrees) {
+    if (!leftViewer) return;
+    const rad = (degrees * Math.PI) / 180;
+    const half = rad * 0.5;
+    const ry = Math.sin(half);
+    const rw = Math.cos(half);
+
+    const q = leftViewer.projectionOrientation.orientation;
+    const q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3];
+    q[0] = q0 * rw - q2 * ry;
+    q[1] = q1 * rw + q3 * ry;
+    q[2] = q2 * rw + q0 * ry;
+    q[3] = q3 * rw - q1 * ry;
+
+    leftViewer.projectionOrientation.changed.dispatch();
+    leftViewer.display?.scheduleRedraw();
+    rightViewer?.display?.scheduleRedraw();
+  }
+
   let lastOrbitTime = performance.now();
+  let currentRotationAngle = 0;
+  let lastGamepadButtonState = {};
+
   function orbitAnimationLoop(now) {
     const dt = Math.min(0.1, (now - lastOrbitTime) / 1000);
     lastOrbitTime = now;
 
     if (stereoState.autoOrbit && leftViewer && rightViewer) {
-      const angle = dt * 0.32;
-      const half = angle * 0.5;
-      const ry = Math.sin(half);
-      const rw = Math.cos(half);
+      const deg = dt * 0.32 * (180 / Math.PI);
+      rotateVolumeDegrees(deg);
+      currentRotationAngle = (currentRotationAngle + deg) % 360;
+    }
 
-      const q = leftViewer.projectionOrientation.orientation;
-      const q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3];
-      q[0] = q0 * rw - q2 * ry;
-      q[1] = q1 * rw + q3 * ry;
-      q[2] = q2 * rw + q0 * ry;
-      q[3] = q3 * rw - q1 * ry;
+    // Quest Touch Controller gamepad polling when in 2D / SBS screen mode
+    if (navigator.getGamepads && !xrSession && leftViewer) {
+      const gamepads = navigator.getGamepads();
+      if (gamepads) {
+        for (let i = 0; i < gamepads.length; i++) {
+          const gp = gamepads[i];
+          if (!gp || !gp.connected) continue;
 
-      leftViewer.projectionOrientation.changed.dispatch();
+          // Thumbstick X for rotation
+          const stickX =
+            Math.abs(gp.axes[2]) > 0.15
+              ? gp.axes[2]
+              : Math.abs(gp.axes[0]) > 0.15
+              ? gp.axes[0]
+              : 0;
+          if (Math.abs(stickX) > 0.15) {
+            const rotDelta = stickX * dt * 75;
+            rotateVolumeDegrees(rotDelta);
+            currentRotationAngle = (currentRotationAngle + rotDelta + 360) % 360;
+          }
+
+          // Thumbstick Y for zoom
+          const stickY =
+            Math.abs(gp.axes[3]) > 0.15
+              ? gp.axes[3]
+              : Math.abs(gp.axes[1]) > 0.15
+              ? gp.axes[1]
+              : 0;
+          if (Math.abs(stickY) > 0.18 && leftViewer.projectionScale) {
+            const factor = 1.0 + stickY * dt * 2.0;
+            leftViewer.projectionScale.value = Math.max(10, leftViewer.projectionScale.value * factor);
+            leftViewer.projectionScale.changed.dispatch();
+          }
+
+          // Button A (or button 0 / 4) for cycling volume depth resolution
+          const btnA = gp.buttons[0]?.pressed || gp.buttons[4]?.pressed;
+          const idA = `${i}_A`;
+          if (btnA && !lastGamepadButtonState[idA]) {
+            cycleResolutionSamples();
+          }
+          lastGamepadButtonState[idA] = !!btnA;
+
+          // Button B (or button 1 / 5) for toggling Zoom-relative
+          const btnB = gp.buttons[1]?.pressed || gp.buttons[5]?.pressed;
+          const idB = `${i}_B`;
+          if (btnB && !lastGamepadButtonState[idB]) {
+            toggleZoomRelative();
+          }
+          lastGamepadButtonState[idB] = !!btnB;
+        }
+      }
     }
 
     requestAnimationFrame(orbitAnimationLoop);
   }
   requestAnimationFrame(orbitAnimationLoop);
+
+  // ============================================================================
+  // 10b. Meta Quest Media Session & SBS Playback Bar Integration
+  // ============================================================================
+  let mediaSessionAudio = null;
+
+  function updateMediaSessionState() {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      if ('setPositionState' in navigator.mediaSession) {
+        navigator.mediaSession.setPositionState({
+          duration: 360,
+          playbackRate: stereoState.autoOrbit ? 1.0 : 0.0,
+          position: Math.max(0, Math.min(360, currentRotationAngle)),
+        });
+      }
+    } catch (_) {}
+  }
+
+  function initMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+
+    // Silent looping audio to keep MediaSession active in Quest Horizon OS media player
+    if (!mediaSessionAudio) {
+      const silentWav =
+        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      mediaSessionAudio = new Audio(silentWav);
+      mediaSessionAudio.loop = true;
+      mediaSessionAudio.volume = 0.01;
+    }
+
+    const startAudio = () => {
+      if (mediaSessionAudio && mediaSessionAudio.paused) {
+        mediaSessionAudio.play().catch(() => {});
+      }
+    };
+    window.addEventListener('click', startAudio, { once: true });
+    window.addEventListener('touchstart', startAudio, { once: true });
+    window.addEventListener('pointerdown', startAudio, { once: true });
+
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Neuroglancer 3D Volume',
+        artist: 'VRZarr (Quest SBS Mode)',
+        album: '⏪ -10s / ⏩ +10s rotates view ±10° | ▶/⏸ Auto-Orbit',
+      });
+    } catch (_) {}
+
+    navigator.mediaSession.playbackState = stereoState.autoOrbit ? 'playing' : 'paused';
+
+    // -10 sec button: Rotate view -10 degrees (Yaw Left)
+    try {
+      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        const deg = details?.seekOffset || 10;
+        rotateVolumeDegrees(-deg);
+        currentRotationAngle = (currentRotationAngle - deg + 360) % 360;
+        updateMediaSessionState();
+        showStereoToast(`↺ Rotated -${deg}° (Quest -10s)`);
+      });
+    } catch (_) {}
+
+    // +10 sec button: Rotate view +10 degrees (Yaw Right)
+    try {
+      navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        const deg = details?.seekOffset || 10;
+        rotateVolumeDegrees(deg);
+        currentRotationAngle = (currentRotationAngle + deg) % 360;
+        updateMediaSessionState();
+        showStereoToast(`↻ Rotated +${deg}° (Quest +10s)`);
+      });
+    } catch (_) {}
+
+    // Play button: Start Auto-Orbit
+    try {
+      navigator.mediaSession.setActionHandler('play', () => {
+        stereoState.autoOrbit = true;
+        if (mediaSessionAudio && mediaSessionAudio.paused) {
+          mediaSessionAudio.play().catch(() => {});
+        }
+        navigator.mediaSession.playbackState = 'playing';
+        if (btnAutoOrbit) btnAutoOrbit.classList.add('active');
+        showStereoToast('▶ Auto-Orbit Started (Quest Play)');
+        updateMediaSessionState();
+      });
+    } catch (_) {}
+
+    // Pause button: Stop Auto-Orbit
+    try {
+      navigator.mediaSession.setActionHandler('pause', () => {
+        stereoState.autoOrbit = false;
+        navigator.mediaSession.playbackState = 'paused';
+        if (btnAutoOrbit) btnAutoOrbit.classList.remove('active');
+        showStereoToast('⏸ Auto-Orbit Paused (Quest Pause)');
+        updateMediaSessionState();
+      });
+    } catch (_) {}
+
+    // Timeline Scrubbing: Map 0-360 seconds directly to 0°-360° rotation angle
+    try {
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details?.seekTime !== undefined) {
+          const targetDeg = details.seekTime % 360;
+          const delta = targetDeg - currentRotationAngle;
+          rotateVolumeDegrees(delta);
+          currentRotationAngle = targetDeg;
+          updateMediaSessionState();
+          showStereoToast(`🎯 Rotated to ${Math.round(targetDeg)}°`);
+        }
+      });
+    } catch (_) {}
+
+    // Next Track: Cycle resolution depth samples
+    try {
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        cycleResolutionSamples();
+      });
+    } catch (_) {}
+
+    // Previous Track: Toggle 3D Cuboid Limit
+    try {
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        toggleCuboidLimit();
+      });
+    } catch (_) {}
+
+    updateMediaSessionState();
+  }
 
   // ============================================================================
   // 11. UI Event Listeners & VR Hotkeys
@@ -1998,6 +2190,10 @@ void main() {
     stereoState.autoOrbit = !stereoState.autoOrbit;
     btnAutoOrbit.classList.toggle('active', stereoState.autoOrbit);
     showStereoToast(stereoState.autoOrbit ? 'Auto-Orbit: ON' : 'Auto-Orbit: OFF');
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = stereoState.autoOrbit ? 'playing' : 'paused';
+      updateMediaSessionState();
+    }
   });
 
   btnSwapEyes.addEventListener('click', () => {
@@ -2443,6 +2639,9 @@ void main() {
 
     // Initialize WebXR for Meta Quest 2 and VR headsets
     initWebXR();
+
+    // Initialize Media Session API for Meta Quest SBS video playback bar (+-10s rotation, Play/Pause orbit)
+    initMediaSession();
 
     // Ensure gyro head tracking is disabled by default everywhere
     disableGyroTracking(true);
