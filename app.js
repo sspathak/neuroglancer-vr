@@ -1479,18 +1479,28 @@ void main() {
     for (const v of [leftViewer, rightViewer]) {
       if (!v?.projectionDepthRange) continue;
       const current = v.projectionDepthRange.value;
-      const zoom = v.navigationState?.zoomFactor?.value || 1.0;
+      // In 3D perspective views, the zoom factor is perspectiveNavigationState.zoomFactor
+      // (or projectionScale), NOT navigationState.zoomFactor (which is for 2D slice views)
+      const zoom =
+        v.perspectiveNavigationState?.zoomFactor?.value ??
+        v.projectionScale?.value ??
+        1.0;
+
       if (nextVal) {
-        // Zoom-relative: negative depth range
+        // Switching to Zoom-relative (negative depth range value in Neuroglancer)
+        // Maintains the EXACT same effective relativeDepthRange so zoom/resolution do not jump
         if (current > 0) {
           v.projectionDepthRange.value = -current / zoom;
-        } else if (current === 0) {
+        } else if (current === 0 || !Number.isFinite(current)) {
           v.projectionDepthRange.value = -50;
         }
       } else {
-        // Fixed absolute depth range: positive depth range
+        // Switching to Fixed absolute depth range (positive depth range value in Neuroglancer)
+        // Maintains the EXACT same effective relativeDepthRange so zoom/resolution do not jump
         if (current < 0) {
           v.projectionDepthRange.value = -current * zoom;
+        } else if (current === 0 || !Number.isFinite(current)) {
+          v.projectionDepthRange.value = 50 * zoom;
         }
       }
       v.display.scheduleRedraw();
@@ -1502,11 +1512,13 @@ void main() {
     if (valZoomRelative) {
       valZoomRelative.textContent = stereoState.zoomRelative ? 'ON (Relative)' : 'OFF (Fixed)';
     }
-    showStereoToast(
-      stereoState.zoomRelative
-        ? 'Zoom-Relative: ON (Depth scales with zoom)'
-        : 'Zoom-Relative: OFF (Fixed depth)'
-    );
+    if (typeof forceVal !== 'boolean') {
+      showStereoToast(
+        stereoState.zoomRelative
+          ? 'Zoom-Relative: ON (Depth scales with zoom)'
+          : 'Zoom-Relative: OFF (Fixed depth)'
+      );
+    }
   }
 
   function setDepthSamples(sampleCount) {
