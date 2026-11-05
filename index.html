@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>VRZarr — Stereoscopic 3D Neuroglancer Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Side-by-Side (SBS) Stereoscopic Stage -->
+  <div id="stereo-stage" class="vr-lens-mode">
+    <!-- Left Eye Viewport -->
+    <div id="eye-left" class="eye-viewport">
+      <div class="eye-frame-wrapper">
+        <iframe id="iframe-left" class="eye-iframe" src="ng/viewer.html" title="Left Eye Neuroglancer"></iframe>
+      </div>
+      <div id="reticle-left" class="stereo-reticle"></div>
+      <div id="toast-left" class="stereo-toast"></div>
+      <div id="badge-left" class="eye-badge">Left Eye</div>
+    </div>
+
+    <div id="center-divider"></div>
+
+    <!-- Right Eye Viewport -->
+    <div id="eye-right" class="eye-viewport">
+      <div class="eye-frame-wrapper">
+        <iframe id="iframe-right" class="eye-iframe" src="ng/viewer.html" title="Right Eye Neuroglancer"></iframe>
+      </div>
+      <div id="reticle-right" class="stereo-reticle"></div>
+      <div id="toast-right" class="stereo-toast"></div>
+      <div id="badge-right" class="eye-badge">Right Eye</div>
+    </div>
+  </div>
+
+  <!-- Quick HUD Toggle Pill (always accessible in top-right corner) -->
+  <button id="hud-toggle-btn" title="Toggle VR Control Panel (Shortcut: Shift+H)">
+    <span>VR Controls</span>
+    <kbd>Shift+H</kbd>
+  </button>
+
+  <!-- Floating Configuration & Stereo Control Dock -->
+  <section id="hud-panel" aria-label="Stereoscopic Neuroglancer Controls">
+    <div class="hud-header">
+      <div class="brand-group">
+        <div class="brand-title">
+          <span>VRZarr Stereo 3D</span>
+          <span class="brand-pill">Neuroglancer SBS</span>
+        </div>
+        <div class="sync-status">
+          <span id="sync-dot" class="status-dot"></span>
+          <span id="sync-label">Initializing Neuroglancer engines…</span>
+        </div>
+      </div>
+
+      <div class="hud-actions">
+        <button id="btn-auto-orbit" class="btn" title="Smoothly rotate the 3D object hands-free (Shortcut: O)">
+          ⟳ Auto-Orbit
+        </button>
+        <button id="btn-swap-eyes" class="btn" title="Swap Left/Right eyes for Cross-Eye vs Parallel VR viewing (Shortcut: X)">
+          ⇄ Swap Eyes (Parallel)
+        </button>
+        <button id="btn-lens-frame" class="btn active" title="Toggle rounded VR lens frame & vignette">
+          🥽 VR Lens Frame
+        </button>
+        <button id="btn-ng-ui" class="btn" title="Show/Hide full Neuroglancer layer bar & shader UI inside both eyes (Shortcut: h)">
+          ⚙ NG HUD <kbd style="font-size: 9px; padding: 0 4px;">h</kbd>
+        </button>
+        <button id="btn-copy-link" class="btn" title="Copy shareable link with current 3D view & stereo parameters">
+          🔗 Copy Link
+        </button>
+        <button id="btn-fullscreen" class="btn primary" title="Enter Fullscreen for VR Viewer (Shortcut: F)">
+          ⛶ Fullscreen
+        </button>
+      </div>
+    </div>
+
+    <!-- Row 1: Preset Datasets & Custom Zarr / Neuroglancer URL Input -->
+    <div class="hud-row">
+      <div class="preset-group">
+        <span class="section-label">Presets:</span>
+        <button id="preset-escargot" class="btn active" data-preset="escargot">
+          🐌 Escargot (QIM Micro-CT)
+        </button>
+        <button id="preset-hipct" class="btn" data-preset="hipct">
+          🧠 Brain Left Hemisphere (UCL HiP-CT 20µm)
+        </button>
+        <button id="preset-heart" class="btn" data-preset="heart">
+          🫀 Human Heart (UCL HiP-CT 8µm)
+        </button>
+      </div>
+
+      <div class="url-input-group">
+        <input
+          id="custom-source-input"
+          type="text"
+          placeholder="Paste full Neuroglancer link (#!...), state JSON, or Zarr URL (gs://..., https://...)"
+          spellcheck="false"
+        />
+        <button id="btn-load-custom" class="btn primary">Load 3D</button>
+      </div>
+    </div>
+
+    <!-- Row 2: Stereo 3D & Rendering Controls -->
+    <div class="controls-grid">
+      <!-- Control 1: Camera-Relative Stereo Shift (IPD) -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>Stereo Eye Shift (IPD)</span>
+          <span id="val-separation" class="control-val">5.50%</span>
+        </div>
+        <input id="slider-separation" type="range" min="0" max="15" step="0.25" value="5.5" />
+        <div class="control-sub">Camera-relative L/R baseline (<kbd>[</kbd> / <kbd>]</kbd>)</div>
+      </div>
+
+      <!-- Control 2: Convergence / Zero-Parallax Depth -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>Convergence (Focal Plane)</span>
+          <span id="val-convergence" class="control-val">90%</span>
+        </div>
+        <input id="slider-convergence" type="range" min="0" max="150" step="5" value="90" />
+        <div class="control-sub">0% = parallel · 100% = center (<kbd>-</kbd> / <kbd>=</kbd>)</div>
+      </div>
+
+      <!-- Control 3: 3D Perspective Distortion (FOV / Proximity) -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>3D Perspective (FOV)</span>
+          <span id="val-perspective" class="control-val">72°</span>
+        </div>
+        <input id="slider-perspective" type="range" min="30" max="120" step="2" value="72" />
+        <div class="control-sub">Manual 3D lens distortion &amp; proximity (<kbd>,</kbd> / <kbd>.</kbd>)</div>
+      </div>
+
+      <!-- Control 4: Automatic 3D Dolly on Zoom -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>Zoom → 3D Dolly</span>
+          <span id="val-dolly" class="control-val">80% (Auto)</span>
+        </div>
+        <input id="slider-dolly" type="range" min="0" max="100" step="5" value="80" />
+        <div class="control-sub">Zoom brings object closer in 3D + stabilizes stereo</div>
+      </div>
+
+      <!-- Control 5: 3D Rendering Mode -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>3D Rendering Mode</span>
+          <span id="val-render-mode" class="control-val">Volume Only</span>
+        </div>
+        <select id="select-render-mode" class="hud-select">
+          <option value="volume_only" selected>3D Volume Raycast Only (Pure 3D)</option>
+          <option value="volume_and_slices">3D Volume Raycast + Intersecting Slices</option>
+          <option value="mip_only">3D Max Intensity Projection (MIP)</option>
+          <option value="slices_only">3D Intersecting Orthogonal Slices Only</option>
+        </select>
+        <div class="control-sub">Press <kbd>V</kbd> to cycle mode · <kbd>h</kbd> NG HUD · <kbd>Shift+H</kbd> VR HUD</div>
+      </div>
+
+      <!-- Control 6: Volume Density / Gain & Colormap -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>3D Volume Density (Gain)</span>
+          <span id="val-gain" class="control-val">-0.6</span>
+        </div>
+        <input id="slider-gain" type="range" min="-4" max="4" step="0.2" value="-0.6" />
+        <div class="control-sub" style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:2px;">
+          <span>Tint:</span>
+          <select id="select-colormap" class="hud-select" style="width:auto; flex:1; padding:2px 6px;">
+            <option value="amber" selected>Warm Ivory / Amber</option>
+            <option value="grayscale">Pure Grayscale</option>
+            <option value="cyan">Cyan Bioluminescence</option>
+            <option value="emerald">Emerald Fluoro</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 3: Keyboard Shortcuts & Navigation Hints -->
+    <div class="hud-footer">
+      <div>
+        <strong>Navigate in either eye:</strong>
+        Drag = 3D Rotate · Wheel / Pinch = 3D Dolly Zoom · <kbd>Shift</kbd>+Drag = Pan · <kbd>Shift</kbd>+Wheel = Slice Plane
+      </div>
+      <div class="kbd-hint">
+        <kbd>[</kbd><kbd>]</kbd> Stereo ·
+        <kbd>-</kbd><kbd>=</kbd> Conv ·
+        <kbd>,</kbd><kbd>.</kbd> 3D FOV ·
+        <kbd>V</kbd> Mode ·
+        <kbd>O</kbd> Orbit ·
+        <kbd>R</kbd> Reset ·
+        <kbd>h</kbd> NG HUD ·
+        <kbd>Shift+H</kbd> VR HUD
+      </div>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

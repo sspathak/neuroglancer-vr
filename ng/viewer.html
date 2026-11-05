@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neuroglancer Stereo Eye Viewport</title>
+  <link href="main.acb978620d8f907b.css" rel="stylesheet">
+  <style>
+    html, body, #neuroglancer-container {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Hide Neuroglancer chrome when VR clean mode is active */
+    body.vr-clean-ui .neuroglancer-viewer-top-row,
+    body.vr-clean-ui .neuroglancer-layer-panel,
+    body.vr-clean-ui .neuroglancer-side-panel-column,
+    body.vr-clean-ui .perspective-panel-show-slice-views,
+    body.vr-clean-ui .neuroglancer-panel-top-row,
+    body.vr-clean-ui .neuroglancer-display-dimensions-widget {
+      display: none !important;
+    }
+
+    body.vr-clean-ui .neuroglancer-data-panel-frame,
+    body.vr-clean-ui .neuroglancer-panel {
+      border: none !important;
+    }
+
+    .neuroglancer-rendered-data-panel {
+      cursor: grab;
+    }
+    .neuroglancer-rendered-data-panel:active {
+      cursor: grabbing;
+    }
+  </style>
+  <script>
+    // Prevent Neuroglancer from opening the "Add Layer" dialog or resetting state on startup
+    window.NEUROGLANCER_OVERRIDE_DEFAULT_VIEWER_OPTIONS = {
+      showLayerDialog: false,
+      resetStateWhenEmpty: false,
+    };
+  </script>
+  <script defer src="453.1ee2edccf4d1a9d6.js"></script>
+  <script defer src="71.ba084d2296886765.js"></script>
+  <script defer src="948.a953587def7ac810.js"></script>
+  <script defer src="741.d5cf66e030d53b54.js"></script>
+  <script defer src="main.acb978620d8f907b.js"></script>
+</head>
+<body class="vr-clean-ui">
+  <div id="neuroglancer-container"></div>
+</body>
+</html>
