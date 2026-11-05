@@ -83,8 +83,11 @@
         <button id="btn-copy-link" class="btn" title="Copy shareable link with current 3D view & stereo parameters">
           🔗 Copy Link
         </button>
-        <button id="btn-gyro-track" class="btn" title="Toggle Phone Gyroscope Head Tracking for Google Cardboard">
-          🎯 Gyro Track
+        <button id="btn-aspect-fix" class="btn" title="Toggle Quest 2:1 SBS horizontal stretch fix (Shortcut: A)">
+          ⇋ Aspect Fix
+        </button>
+        <button id="btn-gyro-track" class="btn" title="Toggle Phone Gyroscope Head Tracking (Disabled by default)">
+          🎯 Gyro: OFF
         </button>
         <button id="btn-fullscreen" class="btn primary" title="Enter Fullscreen for VR Viewer (Shortcut: F)">
           ⛶ Fullscreen
@@ -232,6 +235,21 @@
         </div>
         <div class="control-sub">Increases 3D voxel detail (<kbd>Shift+Z</kbd> · Quest <kbd>A</kbd>)</div>
       </div>
+
+      <!-- Control 9: SBS Aspect Ratio (Quest Stretch Fix) -->
+      <div class="control-card">
+        <div class="control-top">
+          <span>SBS Aspect (Quest Fix)</span>
+          <span id="val-aspect" class="control-val">1.00x (Normal)</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:2px;">
+          <input id="slider-aspect" type="range" min="0.4" max="1.4" step="0.05" value="1.0" style="flex:1;" />
+          <button id="btn-toggle-aspect" class="btn" style="padding:4px 7px; font-size:10.5px; font-weight:600;" title="Toggle 1.0x (Normal) and 0.5x (Quest 2:1 SBS Stretch Fix)">
+            Quest Fix
+          </button>
+        </div>
+        <div class="control-sub">0.5x fixes 2:1 stretch in Quest (<kbd>A</kbd>)</div>
+      </div>
     </div>
 
     <!-- Row 3: Keyboard Shortcuts & Navigation Hints -->
@@ -246,6 +264,7 @@
         <kbd>,</kbd><kbd>.</kbd> 3D FOV ·
         <kbd>Z</kbd> Zoom-Rel ·
         <kbd>Shift+Z</kbd> Res ·
+        <kbd>A</kbd> Aspect Fix ·
         <kbd>V</kbd> Mode ·
         <kbd>O</kbd> Orbit ·
         <kbd>R</kbd> Reset ·

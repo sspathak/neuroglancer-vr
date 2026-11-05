@@ -26,6 +26,7 @@
     showNgUi: false,
     zoomRelative: true,       // Zoom-relative depth range mode (scales depth step with zoom)
     depthSamples: 256,        // 3D volume raycast depth sampling resolution (128..1024)
+    aspectCorrection: 1.0,    // Aspect ratio correction (1.0 = Normal/Cardboard, 0.5 = Quest 2:1 SBS Stretch Fix)
     activePreset: 'escargot',
   };
 
@@ -265,6 +266,10 @@ void main() {
   const selectDepthSamples = document.getElementById('select-depth-samples');
   const valDepthSamples = document.getElementById('val-depth-samples');
   const btnCycleRes = document.getElementById('btn-cycle-res');
+  const sliderAspect = document.getElementById('slider-aspect');
+  const valAspect = document.getElementById('val-aspect');
+  const btnToggleAspect = document.getElementById('btn-toggle-aspect');
+  const btnAspectFix = document.getElementById('btn-aspect-fix');
   const btnCloseHud = document.getElementById('btn-close-hud');
   const btnGyroTrack = document.getElementById('btn-gyro-track');
   const landscapePrompt = document.getElementById('landscape-prompt');
@@ -355,7 +360,7 @@ void main() {
   function installStereoCameraHook(iframeEl, viewer, eyeSign) {
     const win = iframeEl?.contentWindow;
     if (win) {
-      win.vrStereoHook = function (panelNavState, panel) {
+      win.vrStereoHook = function (panelNavState, panel, projParams) {
         const rawZoom =
           panelNavState?.zoomFactor?.value ??
           viewer?.perspectiveNavigationState?.zoomFactor?.value ??
@@ -367,9 +372,19 @@ void main() {
         const halfShift = baseHalfShift * proj.stereoZoomCompensation;
         const convFraction = stereoState.convergencePercent / 100;
 
+        let aspect = null;
+        if (projParams?.logicalWidth && projParams?.logicalHeight) {
+          const rawAspect = projParams.logicalWidth / projParams.logicalHeight;
+          const correction = Number.isFinite(stereoState.aspectCorrection)
+            ? stereoState.aspectCorrection
+            : 1.0;
+          aspect = rawAspect * correction;
+        }
+
         return {
           fov: proj.fov,
           zoom: proj.zoom,
+          aspect: aspect,
           applyShift(invViewMatrix, d, t) {
             // 1. Orbital toe-in / convergence component around the 3D focal point
             const theta = -Math.atan(halfShift * convFraction);
@@ -1274,6 +1289,34 @@ void main() {
     refreshStereoProjection();
   }
 
+  function setAspectCorrection(val) {
+    const clamped = Math.max(0.3, Math.min(2.0, parseFloat(val) || 1.0));
+    stereoState.aspectCorrection = clamped;
+    if (sliderAspect) sliderAspect.value = String(clamped);
+    if (valAspect) {
+      if (Math.abs(clamped - 0.5) < 0.03) {
+        valAspect.textContent = '0.50x (Quest Fix)';
+      } else if (Math.abs(clamped - 1.0) < 0.03) {
+        valAspect.textContent = '1.00x (Normal)';
+      } else {
+        valAspect.textContent = `${clamped.toFixed(2)}x`;
+      }
+    }
+    btnToggleAspect?.classList.toggle('active', Math.abs(clamped - 0.5) < 0.03);
+    btnAspectFix?.classList.toggle('active', Math.abs(clamped - 0.5) < 0.03);
+    refreshStereoProjection();
+  }
+
+  function toggleAspectCorrection() {
+    if (Math.abs(stereoState.aspectCorrection - 0.5) < 0.03) {
+      setAspectCorrection(1.0);
+      showStereoToast('Aspect: 1.0x Normal (1:1 Native)');
+    } else {
+      setAspectCorrection(0.5);
+      showStereoToast('Aspect: 0.5x Quest SBS Fix (Compensates 2:1 Stretch)');
+    }
+  }
+
   // ============================================================================
   // 10. Zoom-Relative Depth Mode & 3D Resolution Sampling Controls
   // ============================================================================
@@ -1493,9 +1536,13 @@ void main() {
     // Curved IMAX-style display cylinder segment in VR space
     const slices = 32;
     const radius = 1.85;
-    const halfAngle = 0.92; // ~53 degrees each side (106 deg total FOV)
-    const yTop = 1.35 + 0.85;
-    const yBottom = 1.35 - 0.85;
+    const lCanvas = iframeLeft?.contentDocument?.querySelector('canvas');
+    const canvasAspect = (lCanvas && lCanvas.height > 0) ? (lCanvas.width / lCanvas.height) : 0.888;
+    const height = 1.70;
+    const targetArc = height * canvasAspect;
+    const halfAngle = Math.min(Math.PI * 0.45, targetArc / (2 * radius));
+    const yTop = 1.35 + (height / 2);
+    const yBottom = 1.35 - (height / 2);
 
     const vertices = [];
     const indices = [];
@@ -1815,6 +1862,24 @@ void main() {
     });
   }
 
+  if (sliderAspect) {
+    sliderAspect.addEventListener('input', (e) => {
+      setAspectCorrection(parseFloat(e.target.value));
+    });
+  }
+
+  if (btnToggleAspect) {
+    btnToggleAspect.addEventListener('click', () => {
+      toggleAspectCorrection();
+    });
+  }
+
+  if (btnAspectFix) {
+    btnAspectFix.addEventListener('click', () => {
+      toggleAspectCorrection();
+    });
+  }
+
   btnNgUi.addEventListener('click', () => {
     updateNgUiVisibility(!stereoState.showNgUi);
     showStereoToast(
@@ -1830,6 +1895,9 @@ void main() {
     params.set('conv', String(stereoState.convergencePercent));
     params.set('fov', String(stereoState.perspectiveFovDeg));
     params.set('dolly', String(stereoState.autoDollyPercent));
+    if (stereoState.aspectCorrection !== 1.0) {
+      params.set('aspect', String(stereoState.aspectCorrection));
+    }
     if (stereoState.swapEyes) params.set('swap', '1');
     params.set('state', JSON.stringify(stateJson));
 
@@ -1924,17 +1992,25 @@ void main() {
     gyroActive = true;
     lastOrientation = null;
     window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
-    btnGyroTrack?.classList.add('active');
+    if (btnGyroTrack) {
+      btnGyroTrack.classList.add('active');
+      btnGyroTrack.textContent = '🎯 Gyro: ON';
+    }
     requestWakeLock();
     showStereoToast('🎯 Cardboard Gyro: ON (Move phone to look around)');
   }
 
-  function disableGyroTracking() {
+  function disableGyroTracking(silent = false) {
     gyroActive = false;
     lastOrientation = null;
     window.removeEventListener('deviceorientation', handleDeviceOrientation);
-    btnGyroTrack?.classList.remove('active');
-    showStereoToast('🎯 Cardboard Gyro: OFF');
+    if (btnGyroTrack) {
+      btnGyroTrack.classList.remove('active');
+      btnGyroTrack.textContent = '🎯 Gyro: OFF';
+    }
+    if (!silent) {
+      showStereoToast('🎯 Cardboard Gyro: OFF');
+    }
   }
 
   function handleDeviceOrientation(e) {
@@ -2037,6 +2113,9 @@ void main() {
     } else if (e.key === 'Z') {
       e.preventDefault();
       cycleResolutionSamples();
+    } else if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault();
+      toggleAspectCorrection();
     } else if (e.key === 'f' || e.key === 'F') {
       e.preventDefault();
       toggleFullscreen();
@@ -2095,6 +2174,9 @@ void main() {
     if (params.has('dolly')) {
       setAutoDolly(parseFloat(params.get('dolly')));
     }
+    if (params.has('aspect')) {
+      setAspectCorrection(parseFloat(params.get('aspect')));
+    }
     if (params.get('swap') === '1') {
       stereoState.swapEyes = true;
       btnSwapEyes.classList.add('active');
@@ -2137,6 +2219,9 @@ void main() {
 
     // Initialize WebXR for Meta Quest 2 and VR headsets
     initWebXR();
+
+    // Ensure gyro head tracking is disabled by default everywhere
+    disableGyroTracking(true);
 
     // Ensure initial Zoom-relative mode and sampling resolution are set
     toggleZoomRelative(stereoState.zoomRelative);

@@ -60,6 +60,20 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
   - **Synchronized Stereo 3D Reticle**: Renders a matched cursor in both eyes simultaneously so your eyes never see a single-eye OS cursor in VR.
   - **Dual-Eye Stereo HUD Toasts**: Keyboard adjustments display a synchronized stereo notification in both eyes so you can read parameter changes without removing your headset.
 
+- **Quest SBS Horizontal Stretch Fix (`A` key / Slider / Header Button)**:
+  - When viewing Side-by-Side (SBS) stereoscopic content in Meta Quest's browser or media viewer, the viewer treats each eye viewport as an anamorphic **Half-SBS** frame and stretches each half horizontally by **2.0×** to fill a 16:9 field of view.
+  - On a standard window without correction, this causes spherical organs and voxels to appear severely widened (oval/distorted).
+  - VRZarr introduces a direct **Projection Matrix Aspect Correction hook** (`vrStereoHook`) into Neuroglancer's WebGL camera builder:
+    - Setting Aspect Correction to **`0.50x`** pre-squeezes the horizontal projection matrix in clip space ($0.5 \times 2.0 = 1.0$), perfectly neutralizing Quest's 2× stretch and restoring true 1:1 isometric voxel proportions!
+    - Toggle with hotkey **`A`**, the **`⇋ Aspect Fix`** header button, or fine-tune between `0.40x` and `1.40x` with the SBS Aspect slider in Control Card 9.
+
+- **Mobile Browser & Google Cardboard Support**:
+  - **Adaptive Responsive HUD**: Fully touch-friendly and smoothly scrollable on iOS Safari and Android Chrome, preventing UI cutoffs on small screens.
+  - **Phone Gyroscope 3DoF Head Tracking (`🎯 Gyro`)**:
+    - **Disabled by default everywhere**: Gyro tracking will *never* activate automatically on page load, fullscreen, or headset connection.
+    - When placing your phone into a Google Cardboard or mobile VR headset, tap **`🎯 Gyro: OFF`** to request sensor permission and activate real-time 3DoF pitch/yaw head tracking.
+    - Automatically accounts for landscape and reverse-landscape phone orientations.
+
 - **Zoom-Relative Depth Mode & 3D Resolution Multipliers**:
   - Keep the exact same camera framing and zoom while dramatically increasing 3D voxel resolution.
   - **Zoom-Relative Depth Mode (`Z` / Button `B`)**: In Neuroglancer, toggles between fixed depth range and relative depth range (`projectionDepthRange < 0`). When enabled, the sampling depth automatically tightens with zoom, eliminating coarse stair-stepping and clipping.
@@ -88,6 +102,7 @@ An automated GitHub Actions workflow is included at [`.github/workflows/deploy.y
 | `,` / `.` | Decrease / Increase 3D Perspective FOV (Lens Distortion) |
 | `Z` | Toggle Zoom-Relative Depth Range Mode |
 | `Shift+Z` | Cycle 3D Raycast Resolution (128 → 256 → 512 → 1024 samples) |
+| `A` | Toggle SBS Aspect Ratio Fix (1.0x Normal ↔ 0.5x Quest SBS Stretch Fix) |
 | `V` | Cycle 3D Rendering Mode (Volume Only → Volume + Slices → MIP → Slices Only) |
 | `O` | Toggle Hands-Free 3D Auto-Orbit Turntable |
 | `X` | Swap Left / Right Eyes (Parallel vs. Cross-Eye mode) |
